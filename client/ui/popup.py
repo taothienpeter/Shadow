@@ -14,6 +14,28 @@ from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QEvent, Q
 from PyQt6.QtGui import QCursor, QPainter, QColor, QPen, QFont
 from client.ui.chat_widget import ChatWidget
 
+# Win32 structures for focus forcing
+class KEYBDINPUT(ctypes.Structure):
+    _fields_ = [
+        ("wVk", wintypes.WORD), ("wScan", wintypes.WORD),
+        ("dwFlags", wintypes.DWORD), ("time", wintypes.DWORD),
+        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+    ]
+
+class INPUT_UNION(ctypes.Union):
+    _fields_ = [("ki", KEYBDINPUT)]
+
+class INPUT(ctypes.Structure):
+    _fields_ = [("type", wintypes.DWORD), ("union", INPUT_UNION)]
+
+INPUT_KEYBOARD = 1
+KEYEVENTF_KEYUP = 0x0002
+VK_MENU = 0x12  # ALT key
+SPI_GETFOREGROUNDLOCKTIMEOUT = 0x2000
+SPI_SETFOREGROUNDLOCKTIMEOUT = 0x2001
+SPIF_SENDCHANGE = 0x02
+SW_RESTORE = 9
+
 
 class FloatingPopup(QDialog):
     """Apple-inspired floating window that appears near cursor."""
@@ -36,6 +58,8 @@ class FloatingPopup(QDialog):
         self._last_voice_mode_time = 0
         self._last_show_time = 0
         self._debounce_interval = 0.3  # 300ms minimum between actions
+        # Flag to prevent auto-hide during initial show/focus window
+        self._is_initializing = False
         self._setup_ui()
         self._apply_styles()
 
@@ -47,17 +71,45 @@ class FloatingPopup(QDialog):
         self.clear_input_requested.connect(self.clear_input)
 
     def _force_focus(self):
-        """Force window to foreground using Win32 API (needed for cross-application focus on Windows)."""
-        try:
-            hwnd = int(self.winId())
-            # Show the window if it's minimized
-            ctypes.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
-            # Bring window to foreground
-            ctypes.windll.user32.SetForegroundWindow(hwnd)
-        except Exception:
-            # Fallback to Qt methods if Win32 fails
-            self.raise_()
-            self.activateWindow()
+        """Force window to foreground using multiple Win32 techniques."""
+        hwnd = int(self.winId())
+
+        if ctypes.windll.user32.GetForegroundWindow() == hwnd:
+            return
+
+        if ctypes.windll.user32.IsIconic(hwnd):
+            ctypes.windll.user32.ShowWindow(hwnd, SW_RESTORE)
+
+        # Technique 1: SendInput ALT trick — makes Windows think our process
+        # received the last input event, satisfying SetForegroundWindow rules.
+        inp = (INPUT * 2)()
+        inp[0].type = INPUT_KEYBOARD
+        inp[0].union.ki = KEYBDINPUT(VK_MENU, 0, 0, 0,
+                                       ctypes.pointer(ctypes.c_ulong(0)))
+        inp[1].type = INPUT_KEYBOARD
+        inp[1].union.ki = KEYBDINPUT(VK_MENU, 0, KEYEVENTF_KEYUP, 0,
+                                       ctypes.pointer(ctypes.c_ulong(0)))
+        ctypes.windll.user32.SendInput(2, ctypes.byref(inp),
+                                         ctypes.sizeof(INPUT))
+
+        if ctypes.windll.user32.SetForegroundWindow(hwnd):
+            if ctypes.windll.user32.GetForegroundWindow() == hwnd:
+                return
+
+        # Technique 2: Temporarily disable foreground lock timeout
+        # (this is how GLFW handles the same problem)
+        timeout = ctypes.c_int(0)
+        zero = ctypes.c_int(0)
+        ctypes.windll.user32.SystemParametersInfoW(
+            SPI_GETFOREGROUNDLOCKTIMEOUT, 0, ctypes.byref(timeout), 0)
+        ctypes.windll.user32.SystemParametersInfoW(
+            SPI_SETFOREGROUNDLOCKTIMEOUT, 0, ctypes.byref(zero),
+            SPIF_SENDCHANGE)
+        ctypes.windll.user32.SetForegroundWindow(hwnd)
+        # Restore original timeout immediately
+        ctypes.windll.user32.SystemParametersInfoW(
+            SPI_SETFOREGROUNDLOCKTIMEOUT, 0, ctypes.byref(timeout),
+            SPIF_SENDCHANGE)
 
     def _setup_ui(self):
         """Initialize the UI components and layout."""
@@ -249,12 +301,16 @@ class FloatingPopup(QDialog):
         self.fade_in()
         self.raise_()
         self.activateWindow()
-        # Force focus using Win32 API for cross-application activation
-        self._force_focus()
-        # Auto-focus the input field focus after showing
-        QTimer.singleShot(100, lambda: self.input_field.setFocus())
-        # Fallback activateWindow call in case window manager delays processing
+
+        # Mark as initializing to prevent auto-hide during focus establishment
+        self._is_initializing = True
+        QTimer.singleShot(500, lambda: setattr(self, '_is_initializing', False))
+
+        # Focus the window after a short delay to let window manager settle
         QTimer.singleShot(50, self._force_focus)
+        QTimer.singleShot(150, self._force_focus)
+        # Auto-focus the input field after showing
+        QTimer.singleShot(100, lambda: self.input_field.setFocus())
 
     def show_voice_mode(self):
         """Show popup with voice input active (mic icon pulsing)."""
@@ -292,6 +348,7 @@ class FloatingPopup(QDialog):
         self.setWindowOpacity(0.0)
         self.resize(480, 200)
         self.show()
+        self._force_focus()
 
         self.anim = QPropertyAnimation(self, b"windowOpacity")
         self.anim.setDuration(200)
@@ -390,7 +447,7 @@ class FloatingPopup(QDialog):
     def eventFilter(self, obj, event):
         """Handle focus loss for auto-hide (unless pinned)."""
         if event.type() == QEvent.Type.WindowDeactivate:
-            if not self._pinned and self.isVisible():
+            if not self._pinned and self.isVisible() and not self._is_initializing:
                 # Delay slightly to avoid hiding on click interactions
                 QTimer.singleShot(150, self._check_hide_on_deactivate)
         return super().eventFilter(obj, event)

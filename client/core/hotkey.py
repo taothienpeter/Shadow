@@ -4,7 +4,6 @@ Listens for global hotkeys and triggers actions
 """
 
 import sys
-import subprocess
 from typing import Callable, Dict
 try:
     from pynput import keyboard
@@ -17,47 +16,14 @@ except ImportError:
 class HotkeyManager:
     """Manages global hotkey registration and handling"""
 
-    def __init__(self, callbacks: dict = None):
+    def __init__(self, callbacks: dict[str, Callable] = None):
         self.listener = None
         self.running = False
+        self._callbacks = callbacks or {}
 
-        # Default hotkey mappings: {hotkey_string: callback_function}
-        # These can be overridden by the callbacks parameter
-        self.hotkey_map = {
-            '<alt>+q': self.open_notepad_q,  # Feature Q hotkey
-            '<alt>+x': self.open_notepad_x,  # Feature X hotkey
-            '<alt>+c': self.open_notepad_c,  # Feature C hotkey
-        }
-
-        # Override defaults with provided callbacks
-        if callbacks:
-            for combo, cb in callbacks.items():
-                if combo in self.hotkey_map:
-                    self.hotkey_map[combo] = cb
-
-    def open_notepad_q(self):
-        """Callback for Q hotkey - opens notepad"""
-        print("Hotkey Q triggered: Opening notepad")
-        try:
-            subprocess.Popen(['notepad.exe'])
-        except Exception as e:
-            print(f"Failed to open notepad: {e}")
-
-    def open_notepad_x(self):
-        """Callback for X hotkey - opens notepad"""
-        print("Hotkey X triggered: Opening notepad")
-        try:
-            subprocess.Popen(['notepad.exe'])
-        except Exception as e:
-            print(f"Failed to open notepad: {e}")
-
-    def open_notepad_c(self):
-        """Callback for C hotkey - opens notepad"""
-        print("Hotkey C triggered: Opening notepad")
-        try:
-            subprocess.Popen(['notepad.exe'])
-        except Exception as e:
-            print(f"Failed to open notepad: {e}")
+        # Warn if no callbacks provided
+        if not self._callbacks:
+            print("Warning: No hotkey callbacks provided")
 
     def start(self):
         """Start the hotkey listener"""
@@ -69,16 +35,18 @@ class HotkeyManager:
             print("Hotkey listener already running")
             return True
 
+        if not self._callbacks:
+            print("Warning: No hotkey callbacks provided - listener will not triggers any actions")
+            return False
+
         try:
             # Start the listener
-            self.listener = keyboard.GlobalHotKeys({
-                hotkey_str: callback for hotkey_str, callback in self.hotkey_map.items()
-            })
+            self.listener = keyboard.GlobalHotKeys(self._callbacks)
             self.listener.start()
             self.running = True
             print("Hotkey listener started successfully")
             print("Registered hotkeys:")
-            for hotkey_str in self.hotkey_map.keys():
+            for hotkey_str in self._callbacks.keys():
                 print(f"  {hotkey_str}")
             return True
 
@@ -107,13 +75,26 @@ def test_hotkey():
 
     print("Starting hotkey test...")
     print("Try pressing:")
-    print("  Alt+Q - Feature Q (opens notepad)")
-    print("  Alt+X - Feature X (opens notepad)")
-    print("  Alt+C - Feature C (opens notepad)")
+    print("  Alt+Q - Toggle popup")
+    print("  Alt+X - Voice input mode")
+    print("  Alt+C - Screenshot + context analysis")
     print("Press Ctrl+C in this console to exit")
 
-    # Create and start hotkey manager
-    hotkey_manager = HotkeyManager()
+    # Create and start hotkey manager with test callbacks
+    def test_q():
+        print("Hotkey Q triggered: Toggle popup")
+
+    def test_x():
+        print("Hotkey X triggered: Voice input mode")
+
+    def test_c():
+        print("Hotkey C triggered: Screenshot + context analysis")
+
+    hotkey_manager = HotkeyManager(callbacks={
+        '<alt>+q': test_q,
+        '<alt>+x': test_x,
+        '<alt>+c': test_c,
+    })
 
     if hotkey_manager.start():
         print("Hotkey listener started successfully!")

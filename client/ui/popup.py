@@ -4,6 +4,7 @@ import sys
 import os
 import time
 import ctypes
+import asyncio
 from ctypes import wintypes
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -12,7 +13,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QEvent, QPoint, pyqtSignal, QObject, QAbstractAnimation
 from PyQt6.QtGui import QCursor, QPainter, QColor, QPen, QFont
-from client.ui.chat_widget import ChatWidget
+
+from client.core.api_client import ApiClient
 
 # Win32 structures for focus forcing
 class KEYBDINPUT(ctypes.Structure):
@@ -46,10 +48,12 @@ class FloatingPopup(QDialog):
     set_context_text_requested = pyqtSignal(str)
     set_input_text_requested = pyqtSignal(str)
     clear_input_requested = pyqtSignal()
+    response_received = pyqtSignal(dict)  # For ask-respond responses
 
-    def __init__(self, parent=None, api_client=None):
+    def __init__(self, parent=None, api_client=None, async_runner=None):
         super().__init__(parent)
         self.api_client = api_client
+        self._async_runner = async_runner
         self._pinned = False
         self._voice_mode = False
         self._drag_pos = None
@@ -414,13 +418,18 @@ class FloatingPopup(QDialog):
         if text:
             # Clear input (we removed chat area display for now)
             self.input_field.clear()
+            self.context_label.setText("Sending...")
 
-            # Simulate AI response (will be replaced with real API call)
-            # We'll just show it in the context area for now as feedback
+            # Send request via send_message (webhook) and emit response
             if self.api_client:
-                # This would be async in real implementation
-                response = self.api_client.chat(text)
-                self.context_label.setText(f"AI: {response}")
+                # Use the shared async runner instead of creating a new event loop
+                try:
+                    future = self._async_runner.run_coro(
+                        self.api_client.send_message(text)
+                    )
+                    future.add_done_callback(self._on_response_future_done)
+                except Exception as e:
+                    self.context_label.setText(f"Error: {str(e)}")
             else:
                 # Fallback response when no API client
                 self.context_label.setText(f"Echo: {text}")
@@ -443,6 +452,19 @@ class FloatingPopup(QDialog):
     def clear_input(self):
         """Clear the input field."""
         self.input_field.clear()
+
+    def _on_response_future_done(self, future):
+        """Called from background thread when the async response arrives."""
+        try:
+            response = future.result()
+            if response is not None:
+                self.response_received.emit(response)
+                display_text = ApiClient.extract_response_text(response)
+                self.set_context_text_requested.emit(f"Response: {display_text}")
+            else:
+                self.set_context_text_requested.emit("Error: No response received")
+        except Exception as e:
+            self.set_context_text_requested.emit(f"Error: {str(e)}")
 
     def eventFilter(self, obj, event):
         """Handle focus loss for auto-hide (unless pinned)."""

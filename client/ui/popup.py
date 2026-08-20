@@ -460,11 +460,27 @@ class FloatingPopup(QDialog):
                 self.context_label.setText(f"Echo: {text}")
 
     def _on_context_action(self, action):
-        """Handle context chip button clicks."""
-        if action == "summarize":
-            self.context_label.setText("Summary: [Feature not implemented yet]")
-        elif action == "note":
-            self.context_label.setText("Note saved: [Feature not implemented yet]")
+        """Handle context chip button clicks by sending them to the API."""
+        from datetime import datetime, timezone
+        context_text = self.context_label.toolTip() or self.context_label.text()
+        self.context_label.setText(f"{action.capitalize()}ing...")
+
+        if self.api_client and self._async_runner:
+            payload = {
+                "action": f"context_{action}",
+                "context": context_text,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "source": "desktop_assistant"
+            }
+            try:
+                future = self._async_runner.run_coro(
+                    self.api_client.ask_respond(payload)
+                )
+                future.add_done_callback(self._on_response_future_done)
+            except Exception as e:
+                self.context_label.setText(f"Error: {str(e)}")
+        else:
+            self.context_label.setText(f"Action '{action}' simulated.")
 
     def set_context_text(self, text: str):
         """Set the context text displayed in the context chip."""

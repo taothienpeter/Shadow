@@ -106,6 +106,11 @@ def main():
     popup.response_received.connect(_show_response_tray)
 
     # Context collector response / error feedback
+    def _on_analysis_started():
+        popup.set_context_text("Analyzing screen context...")
+        popup.show_at_cursor()
+        tray.show_message("Context Analyzer", "Capturing and analyzing screen...", 2000)
+
     def _on_context_ready(response: dict):
         text = ApiClient.extract_response_text(response)
         popup.set_context_text(f"Context: {text}")
@@ -116,6 +121,7 @@ def main():
         popup.set_context_text(f"Context Error: {error_msg}")
         tray.show_message("Context Error", error_msg[:100], 5000)
 
+    context_collector.analysis_started.connect(_on_analysis_started)
     context_collector.context_ready.connect(_on_context_ready)
     context_collector.context_error.connect(_on_context_error)
 

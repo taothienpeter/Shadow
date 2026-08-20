@@ -30,6 +30,7 @@ class ContextCollector(QObject):
     # Signals
     context_ready = pyqtSignal(dict)      # Emitted with server response
     context_error = pyqtSignal(str)       # Emitted with error message
+    analysis_started = pyqtSignal()       # Emitted when analysis starts
 
     def __init__(self, screenshot, api_client, async_runner):
         """
@@ -50,6 +51,8 @@ class ContextCollector(QObject):
         Main pipeline: capture screenshot, get app info, build payload, call API, emit signal.
         This method is designed to be called from the pynput hotkey thread.
         """
+        # Notify UI that analysis has started
+        self.analysis_started.emit()
         # Run the actual work in a background thread to avoid blocking the hotkey thread
         thread = threading.Thread(target=self._capture_and_analyze_worker, daemon=True)
         thread.start()

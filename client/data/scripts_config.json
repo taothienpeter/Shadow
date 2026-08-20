@@ -1,0 +1,14 @@
+{
+  "scripts": [
+    {
+      "name": "Task Manager",
+      "command": "taskmgr.exe",
+      "cwd": ""
+    },
+    {
+      "name": "Command Prompt",
+      "command": "cmd.exe",
+      "cwd": ""
+    }
+  ]
+}

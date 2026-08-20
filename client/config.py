@@ -12,12 +12,16 @@ class ClientConfig(BaseSettings):
     notification_port: int = 8080
     tailscale_ip: str = "0.0.0.0"  # Bind address for listener (set to Tailscale IP in .env)
     # N8N webhook URL for all API interactions (chat, context analysis, notes, scripts)
-    n8n_webhook_url: str = "https://n8n.taothienpeter.io.vn/webhook/assistant"  # Full webhook URL
+    n8n_webhook_url: str = ""  # Full webhook URL
     # URL n8n uses to reach this laptop for notifications (set in .env)
     n8n_notification_url: str = ""
     # n8n API key for authenticated requests
     n8n_api_key: str = ""
     # Shared secret for authenticating incoming notifications from n8n
     n8n_auth_token: str = ""
+    # Scripts configuration
+    scripts_config_path: str = "scripts_config.json"
+    # Notification queue configuration
+    notification_queue_path: str = "notification_queue.json"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

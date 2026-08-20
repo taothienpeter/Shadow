@@ -121,17 +121,38 @@ class ScreenshotCapture:
         if not MSS_AVAILABLE or not PIL_AVAILABLE:
             raise RuntimeError("Required dependencies not available")
 
-        # Define the region to capture
-        monitor = {"top": y, "left": x, "width": width, "height": height}
+        try:
+            # Get virtual screen bounding box to clamp coordinates
+            virtual_mon = self._sct.monitors[0]
+            v_left = virtual_mon["left"]
+            v_top = virtual_mon["top"]
+            v_right = v_left + virtual_mon["width"]
+            v_bottom = v_top + virtual_mon["height"]
 
-        # Capture the screen
-        screenshot = self._sct.grab(monitor)
+            clamped_left = max(v_left, min(x, v_right - 1))
+            clamped_top = max(v_top, min(y, v_bottom - 1))
+            clamped_right = max(clamped_left + 1, min(x + width, v_right))
+            clamped_bottom = max(clamped_top + 1, min(y + height, v_bottom))
 
-        # Convert to PIL Image
-        img = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
+            # Define the region to capture
+            monitor = {
+                "top": clamped_top,
+                "left": clamped_left,
+                "width": clamped_right - clamped_left,
+                "height": clamped_bottom - clamped_top,
+            }
 
-        # Compress to JPEG
-        return self._compress(img)
+            # Capture the screen
+            screenshot = self._sct.grab(monitor)
+
+            # Convert to PIL Image
+            img = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
+
+            # Compress to JPEG
+            return self._compress(img)
+        except Exception:
+            # Fallback to full screen if region capture fails
+            return self.capture_all()
 
     def _compress(self, raw_img: Image, quality: int = 70) -> bytes:
         """

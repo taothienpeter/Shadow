@@ -29,8 +29,9 @@ class NotificationHandler(BaseHTTPRequestHandler):
                 self.send_error(401, "Unauthorized")
                 return
 
-        # Only handle POST to /notification or root path
-        if self.path not in ("/notification", "/"):
+        # Only handle POST to /notification or root path (normalize trailing slash and query params)
+        clean_path = self.path.split("?")[0].rstrip("/")
+        if clean_path not in ("/notification", ""):
             self.send_error(404, "Not found")
             return
 
@@ -137,8 +138,13 @@ class NotificationListener(QObject):
             return
 
         self._running = False
+        if hasattr(self, 'server') and self.server:
+            try:
+                self.server.shutdown()
+            except Exception:
+                pass
         if self.thread:
-            self.thread.join(timeout=10.0)  # Longer timeout to allow for restart delay
+            self.thread.join(timeout=2.0)
         print("Notification listener stopped.")
 
     def _handle_notification(self, payload: dict):

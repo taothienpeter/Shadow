@@ -17,15 +17,40 @@ from PyQt6.QtGui import QCursor, QPainter, QColor, QPen, QFont
 from client.core.api_client import ApiClient
 
 # Win32 structures for focus forcing
+ULONG_PTR = ctypes.c_size_t
+
+class MOUSEINPUT(ctypes.Structure):
+    _fields_ = [
+        ("dx", wintypes.LONG),
+        ("dy", wintypes.LONG),
+        ("mouseData", wintypes.DWORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ULONG_PTR),
+    ]
+
 class KEYBDINPUT(ctypes.Structure):
     _fields_ = [
-        ("wVk", wintypes.WORD), ("wScan", wintypes.WORD),
-        ("dwFlags", wintypes.DWORD), ("time", wintypes.DWORD),
-        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+        ("wVk", wintypes.WORD),
+        ("wScan", wintypes.WORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ULONG_PTR),
+    ]
+
+class HARDWAREINPUT(ctypes.Structure):
+    _fields_ = [
+        ("uMsg", wintypes.DWORD),
+        ("wParamL", wintypes.WORD),
+        ("wParamH", wintypes.WORD),
     ]
 
 class INPUT_UNION(ctypes.Union):
-    _fields_ = [("ki", KEYBDINPUT)]
+    _fields_ = [
+        ("mi", MOUSEINPUT),
+        ("ki", KEYBDINPUT),
+        ("hi", HARDWAREINPUT),
+    ]
 
 class INPUT(ctypes.Structure):
     _fields_ = [("type", wintypes.DWORD), ("union", INPUT_UNION)]
@@ -88,11 +113,9 @@ class FloatingPopup(QDialog):
         # received the last input event, satisfying SetForegroundWindow rules.
         inp = (INPUT * 2)()
         inp[0].type = INPUT_KEYBOARD
-        inp[0].union.ki = KEYBDINPUT(VK_MENU, 0, 0, 0,
-                                       ctypes.pointer(ctypes.c_ulong(0)))
+        inp[0].union.ki = KEYBDINPUT(VK_MENU, 0, 0, 0, 0)
         inp[1].type = INPUT_KEYBOARD
-        inp[1].union.ki = KEYBDINPUT(VK_MENU, 0, KEYEVENTF_KEYUP, 0,
-                                       ctypes.pointer(ctypes.c_ulong(0)))
+        inp[1].union.ki = KEYBDINPUT(VK_MENU, 0, KEYEVENTF_KEYUP, 0, 0)
         ctypes.windll.user32.SendInput(2, ctypes.byref(inp),
                                          ctypes.sizeof(INPUT))
 
@@ -166,6 +189,8 @@ class FloatingPopup(QDialog):
 
         self.context_label = QLabel("No context")
         self.context_label.setObjectName("contextLabel")
+        self.context_label.setWordWrap(True)
+        self.context_label.setMaximumWidth(280)
         layout.addWidget(self.context_label)
 
         layout.addStretch()
@@ -443,7 +468,9 @@ class FloatingPopup(QDialog):
 
     def set_context_text(self, text: str):
         """Set the context text displayed in the context chip."""
-        self.context_label.setText(text)
+        self.context_label.setToolTip(text)
+        display_text = text if len(text) <= 100 else text[:97] + "..."
+        self.context_label.setText(display_text)
 
     def set_input_text(self, text: str):
         """Set the text in the input field."""

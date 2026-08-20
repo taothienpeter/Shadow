@@ -1,7 +1,9 @@
+import sys
+from PyQt6.QtWidgets import QApplication
 from client.ui.popup import FloatingPopup
 from client.core.api_client import ApiClient
-from PyQt6.QtWidgets import QApplication
-import sys
+
+app = QApplication.instance() or QApplication(sys.argv)
 
 # Check that FloatingPopup has the expected methods and signals
 popup = FloatingPopup()

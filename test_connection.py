@@ -13,7 +13,14 @@ import time
 import socket
 import urllib.request
 import urllib.error
-from datetime import datetime
+from datetime import datetime, timezone
+
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
 
 # Add the client directory to the path so we can import modules
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'client'))
@@ -162,7 +169,7 @@ class NotificationTester(QObject):
     """Helper class to test notification reception using Qt signals."""
 
     # Define a signal to match NotificationListener's signal
-    notification_received = pyqt = pyqtSignal(dict)
+    notification_received = pyqtSignal(dict)
 
     def __init__(self):
         super().__init__()

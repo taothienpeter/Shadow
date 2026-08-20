@@ -145,12 +145,25 @@ class ContextCollector(QObject):
         """
         from datetime import datetime, timezone
 
+        screen_res = "1920x1080"
+        try:
+            if WIN32GUI_AVAILABLE:
+                import win32api
+                import win32con
+                w = win32api.GetSystemMetrics(win32con.SM_CXSCREEN)
+                h = win32api.GetSystemMetrics(win32con.SM_CYSCREEN)
+                screen_res = f"{w}x{h}"
+        except Exception:
+            pass
+
         payload = {
+            "action": "context_analysis",
             "screenshot_b64": screenshot_b64 if include_screenshot else None,
             "active_app": app_name,
             "window_title": window_title,
-            "screen_resolution": "1920x1080",  # TODO: Get actual screen resolution
+            "screen_resolution": screen_res,
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            "source": "desktop_assistant",
             "voice_text": None  # Voice input not implemented yet
         }
 

@@ -21,8 +21,21 @@ def main():
     print("Press Ctrl+C in this console to exit")
     print("-" * 30)
 
-    # Create and start hotkey manager
-    hotkey_manager = HotkeyManager()
+    # Create and start hotkey manager with test callbacks
+    def on_q():
+        print("  -> Triggered: Alt+Q (Toggle Popup)")
+
+    def on_x():
+        print("  -> Triggered: Alt+X (Voice Input Mode)")
+
+    def on_c():
+        print("  -> Triggered: Alt+C (Context Analysis)")
+
+    hotkey_manager = HotkeyManager({
+        "<alt>+q": on_q,
+        "<alt>+x": on_x,
+        "<alt>+c": on_c,
+    })
 
     if hotkey_manager.start():
         print("Hotkey listener started successfully!")

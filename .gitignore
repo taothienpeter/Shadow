@@ -1,0 +1,30 @@
+# 1. Khai báo bình luận (Git sẽ bỏ qua các dòng bắt đầu bằng dấu #)
+# Đây là file cấu hình mẫu
+
+# 2. Bỏ qua các thư mục chứa thư viện phụ thuộc (rất nặng, không cần commit)
+plans/
+bower_components/
+.claude/
+# 3. Bỏ qua các file cấu hình chứa thông tin bảo mật (mật khẩu, API key)
+.env
+.env.local
+config/secure_keys.json
+CLAUDE.md
+README_TEST.md
+shadow.code-workspace
+# 4. Bỏ qua các file sinh ra trong quá trình biên dịch (Build outputs)
+dist/
+build/
+*.out
+
+# 5. Bỏ qua các file log hệ thống hoặc file rác của hệ điều hành
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 6. Ngoại lệ: Không bỏ qua file này dù nó nằm trong thư mục bị ẩn
+!dist/important-config.json

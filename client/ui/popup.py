@@ -1,6 +1,5 @@
-"""Floating Popup Window — True Apple Spotlight layout with borderless hero input, hairline divider, and dynamic result area."""
+"""Floating Popup Window — Ultra-sleek Conversational AI Assistant input bar (Apple Dark Theme)."""
 
-import sys
 import os
 import time
 import ctypes
@@ -8,7 +7,7 @@ from datetime import datetime, timezone
 from ctypes import wintypes
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QLineEdit, QApplication, QWidget, QFrame, QScrollArea
+    QLineEdit, QApplication, QWidget, QFrame
 )
 from PyQt6.QtCore import (
     Qt, QTimer, QPropertyAnimation, QEasingCurve, QEvent,
@@ -56,7 +55,7 @@ SW_RESTORE = 9
 # ── Main Widget ─────────────────────────────────────────────────
 
 class FloatingPopup(QDialog):
-    """True Apple Spotlight-style floating assistant window."""
+    """Ultra-sleek conversational assistant floating bar."""
 
     # Signals
     toggle_requested = pyqtSignal()
@@ -66,10 +65,9 @@ class FloatingPopup(QDialog):
     clear_input_requested = pyqtSignal()
     response_received = pyqtSignal(dict)
 
-    BASE_WIDTH = 580
-    IDLE_HEIGHT = 160
-    EXPANDED_HEIGHT = 260
-    BORDER_RADIUS = 20
+    BASE_WIDTH = 560
+    BAR_HEIGHT = 96
+    BORDER_RADIUS = 18
 
     def __init__(self, parent=None, api_client=None, async_runner=None):
         super().__init__(parent)
@@ -77,13 +75,13 @@ class FloatingPopup(QDialog):
         self._async_runner = async_runner
         self._pinned = False
         self._voice_mode = False
-        self._is_expanded = False
         self._drag_pos = None
         self._last_toggle_time = 0
         self._last_voice_mode_time = 0
         self._last_show_time = 0
         self._debounce_interval = 0.3
         self._is_initializing = False
+        self._current_context = ""
 
         self._setup_ui()
         self._apply_styles()
@@ -128,123 +126,86 @@ class FloatingPopup(QDialog):
     # ── Layout ──────────────────────────────────────────────────
 
     def _setup_ui(self):
-        """Build the clean Spotlight layout with borderless input and hairline divider."""
+        """Build compact conversational bar: Top Context Tags -> Bottom Chat Input Capsule."""
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint |
             Qt.WindowType.WindowStaysOnTopHint |
             Qt.WindowType.Tool
         )
-        self.setFixedSize(self.BASE_WIDTH, self.IDLE_HEIGHT)
+        self.setFixedSize(self.BASE_WIDTH, self.BAR_HEIGHT)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
         self.root_layout = QVBoxLayout(self)
-        self.root_layout.setContentsMargins(22, 16, 22, 14)
-        self.root_layout.setSpacing(0)
+        self.root_layout.setContentsMargins(16, 12, 16, 12)
+        self.root_layout.setSpacing(6)
 
-        # ── 1. Spotlight Hero Input (Borderless) ──
-        self.root_layout.addLayout(self._build_input_row())
-        self.root_layout.addSpacing(12)
-
-        # ── 2. Hairline Divider ──
-        divider = QFrame()
-        divider.setObjectName("hairlineDivider")
-        divider.setFrameShape(QFrame.Shape.HLine)
-        divider.setFrameShadow(QFrame.Shadow.Plain)
-        divider.setFixedHeight(1)
-        self.root_layout.addWidget(divider)
-        self.root_layout.addSpacing(12)
-
-        # ── 3. Middle Context & Result Zone ──
-        self.root_layout.addLayout(self._build_content_row())
-
-        self.root_layout.addStretch()
-
-        # ── 4. Footer Zone ──
-        self.root_layout.addLayout(self._build_footer_row())
-
-        self.installEventFilter(self)
-
-    def _build_input_row(self) -> QHBoxLayout:
-        """Top input row: completely borderless, large clean typography."""
-        lay = QHBoxLayout()
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(12)
-
-        self.input_field = QLineEdit()
-        self.input_field.setObjectName("spotlightInput")
-        self.input_field.setPlaceholderText("Search or ask anything...")
-        self.input_field.returnPressed.connect(self._on_send)
-        lay.addWidget(self.input_field)
-
-        self.send_btn = QPushButton("Send")
-        self.send_btn.setObjectName("sendBtn")
-        self.send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.send_btn.clicked.connect(self._on_send)
-        lay.addWidget(self.send_btn)
-
-        return lay
-
-    def _build_content_row(self) -> QHBoxLayout:
-        """Middle row: live status dot, context description, and action buttons."""
-        lay = QHBoxLayout()
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(8)
+        # ── 1. Context Tag Row ──
+        self.context_bar = QWidget()
+        ctx_layout = QHBoxLayout(self.context_bar)
+        ctx_layout.setContentsMargins(4, 0, 4, 0)
+        ctx_layout.setSpacing(6)
 
         self.status_dot = QLabel()
         self.status_dot.setObjectName("statusDot")
-        self.status_dot.setFixedSize(7, 7)
-        lay.addWidget(self.status_dot)
+        self.status_dot.setFixedSize(6, 6)
+        ctx_layout.addWidget(self.status_dot)
 
         self.context_label = QLabel("Ready")
         self.context_label.setObjectName("contextLabel")
-        self.context_label.setWordWrap(True)
-        lay.addWidget(self.context_label, 1)
+        ctx_layout.addWidget(self.context_label)
 
-        lay.addSpacing(8)
+        ctx_layout.addStretch()
 
+        # Quick action: Summarize (text-only minimal tag)
         self.summarize_btn = QPushButton("Summarize")
-        self.summarize_btn.setObjectName("pillBtn")
+        self.summarize_btn.setObjectName("actionTag")
         self.summarize_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.summarize_btn.clicked.connect(lambda: self._on_context_action("summarize"))
-        lay.addWidget(self.summarize_btn)
+        ctx_layout.addWidget(self.summarize_btn)
 
+        # Quick action: Note (text-only minimal tag)
         self.note_btn = QPushButton("Note")
-        self.note_btn.setObjectName("pillBtn")
+        self.note_btn.setObjectName("actionTag")
         self.note_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.note_btn.clicked.connect(lambda: self._on_context_action("note"))
-        lay.addWidget(self.note_btn)
-
-        return lay
-
-    def _build_footer_row(self) -> QHBoxLayout:
-        """Bottom row: subtle keyboard shortcut hints and pin."""
-        lay = QHBoxLayout()
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(14)
-
-        for key, label in [("Esc", "close"), ("Alt+C", "context"), ("Alt+X", "voice")]:
-            k = QLabel(key)
-            k.setObjectName("kbdKey")
-            d = QLabel(label)
-            d.setObjectName("kbdDesc")
-            lay.addWidget(k)
-            lay.addWidget(d)
-
-        lay.addStretch()
+        ctx_layout.addWidget(self.note_btn)
 
         self.pin_btn = QPushButton("Pin")
-        self.pin_btn.setObjectName("pinBtn")
-        self.pin_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.pin_btn.setObjectName("pinTag")
         self.pin_btn.setCheckable(True)
+        self.pin_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.pin_btn.clicked.connect(self._toggle_pin)
-        lay.addWidget(self.pin_btn)
+        ctx_layout.addWidget(self.pin_btn)
 
-        return lay
+        self.root_layout.addWidget(self.context_bar)
+
+        # ── 2. Bottom Chat Input Capsule ──
+        self.input_frame = QFrame()
+        self.input_frame.setObjectName("chatInputFrame")
+        input_layout = QHBoxLayout(self.input_frame)
+        input_layout.setContentsMargins(14, 2, 8, 2)
+        input_layout.setSpacing(8)
+
+        self.input_field = QLineEdit()
+        self.input_field.setObjectName("chatInput")
+        self.input_field.setPlaceholderText("Ask Shadow or type a message...")
+        self.input_field.returnPressed.connect(self._on_send)
+        input_layout.addWidget(self.input_field)
+
+        self.send_btn = QPushButton("Send")
+        self.send_btn.setObjectName("chatSendBtn")
+        self.send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.send_btn.clicked.connect(self._on_send)
+        input_layout.addWidget(self.send_btn)
+
+        self.root_layout.addWidget(self.input_frame)
+
+        self.installEventFilter(self)
 
     # ── Styles ──────────────────────────────────────────────────
 
     def _apply_styles(self):
-        """Load styles from styles.qss."""
+        """Load QSS from styles.qss."""
         path = os.path.join(os.path.dirname(__file__), "styles.qss")
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -252,20 +213,10 @@ class FloatingPopup(QDialog):
         except Exception as e:
             print(f"Style load error: {e}")
 
-    # ── Dynamic Height Resize ───────────────────────────────────
-
-    def _set_expanded(self, expanded: bool):
-        """Smoothly expand/collapse the popup height."""
-        if self._is_expanded == expanded:
-            return
-        self._is_expanded = expanded
-        target_h = self.EXPANDED_HEIGHT if expanded else self.IDLE_HEIGHT
-        self.setFixedHeight(target_h)
-
     # ── Positioning ─────────────────────────────────────────────
 
     def show_at_cursor(self):
-        """Show popup near cursor, clamped to screen bounds."""
+        """Show popup centered at cursor, bounded by screen geometry."""
         now = time.time()
         if now - self._last_show_time < self._debounce_interval:
             return
@@ -273,10 +224,10 @@ class FloatingPopup(QDialog):
 
         pos = QCursor.pos()
         width = self.BASE_WIDTH
-        height = self.height()
+        height = self.BAR_HEIGHT
 
         x = pos.x() - width // 2
-        y = pos.y() - height // 2 - 25
+        y = pos.y() - height // 2 - 20
 
         screen = QApplication.screenAt(pos)
         if screen:
@@ -323,8 +274,7 @@ class FloatingPopup(QDialog):
     def _on_fade_out_done(self):
         self.hide()
         self._voice_mode = False
-        self._set_expanded(False)
-        self.input_field.setPlaceholderText("Search or ask anything...")
+        self.input_field.setPlaceholderText("Ask Shadow or type a message...")
         self.update()
 
     def toggle(self):
@@ -340,7 +290,7 @@ class FloatingPopup(QDialog):
             return
         self._last_voice_mode_time = now
         self._voice_mode = True
-        self.input_field.setPlaceholderText("Listening...")
+        self.input_field.setPlaceholderText("Listening to voice...")
         self.show_at_cursor()
         self.update()
 
@@ -360,10 +310,10 @@ class FloatingPopup(QDialog):
             except Exception as e:
                 self._set_status(f"Error: {e}", "error")
         else:
-            self._set_status(f"Echo: {text}", "ready")
+            self._set_status("Ready", "ready")
 
     def _on_context_action(self, action):
-        ctx = self.context_label.toolTip() or self.context_label.text()
+        ctx = self._current_context or self.context_label.text()
         self._set_status(f"{action.capitalize()}ing...", "working")
 
         if self.api_client and self._async_runner:
@@ -379,7 +329,7 @@ class FloatingPopup(QDialog):
             except Exception as e:
                 self._set_status(f"Error: {e}", "error")
         else:
-            self._set_status(f"Simulated: {action}", "ready")
+            self._set_status("Ready", "ready")
 
     def _on_api_done(self, future):
         try:
@@ -389,20 +339,17 @@ class FloatingPopup(QDialog):
                 text = ApiClient.extract_response_text(resp)
                 self.set_context_text_requested.emit(text)
             else:
-                self.set_context_text_requested.emit("No response")
+                self.set_context_text_requested.emit("No response from server")
         except Exception as e:
             self.set_context_text_requested.emit(f"Error: {e}")
 
     # ── State helpers ───────────────────────────────────────────
 
     def _set_status(self, text, state="ready"):
-        """Update context label, dot colour, and expand height if multiline."""
-        self.context_label.setText(text)
+        """Update context label and dot colour."""
+        short = text if len(text) <= 50 else text[:47] + "..."
+        self.context_label.setText(short)
         self.context_label.setToolTip(text)
-
-        # Expand if response text is long
-        if len(text) > 80:
-            self._set_expanded(True)
 
         colours = {"ready": "#30D158", "working": "#FF9F0A", "error": "#FF453A"}
         c = colours.get(state, "#30D158")
@@ -411,6 +358,7 @@ class FloatingPopup(QDialog):
         )
 
     def set_context_text(self, text: str):
+        self._current_context = text
         self._set_status(text, "ready")
 
     def set_input_text(self, text: str):
@@ -421,7 +369,7 @@ class FloatingPopup(QDialog):
 
     def _toggle_pin(self):
         self._pinned = self.pin_btn.isChecked()
-        self.pin_btn.setText("Unpin" if self._pinned else "Pin")
+        self.pin_btn.setText("Pinned" if self._pinned else "Pin")
 
     # ── Events ──────────────────────────────────────────────────
 
@@ -474,9 +422,9 @@ class FloatingPopup(QDialog):
 
         # Main body
         body = QRectF(rect.adjusted(2, 2, -2, -2))
-        p.setBrush(QColor(20, 20, 24, 242))
+        p.setBrush(QColor(22, 22, 26, 245))
 
-        # Rim light (top-bright → bottom-dim gradient border)
+        # Rim light
         if self._voice_mode:
             grad = QLinearGradient(body.topLeft(), body.bottomRight())
             grad.setColorAt(0.0, QColor(0, 113, 227, 200))
@@ -486,8 +434,8 @@ class FloatingPopup(QDialog):
             p.setPen(QPen(QBrush(grad), 1.5))
         else:
             grad = QLinearGradient(body.topLeft(), body.bottomLeft())
-            grad.setColorAt(0.0, QColor(255, 255, 255, 42))
-            grad.setColorAt(0.4, QColor(255, 255, 255, 16))
+            grad.setColorAt(0.0, QColor(255, 255, 255, 45))
+            grad.setColorAt(0.4, QColor(255, 255, 255, 18))
             grad.setColorAt(1.0, QColor(255, 255, 255, 8))
             p.setPen(QPen(QBrush(grad), 0.8))
 

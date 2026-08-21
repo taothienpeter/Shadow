@@ -1,6 +1,6 @@
 /* ═══════════════════════════════════════════════════════════════
-   Shadow Assistant — True Apple Spotlight Theme
-   Borderless hero input + Hairline divider + Minimal Action Pills
+   Shadow Assistant — Conversational Apple Dark Theme
+   (Compact Floating Bar: Context Tags + Chat Input Capsule)
    ═══════════════════════════════════════════════════════════════ */
 
 QDialog {
@@ -8,118 +8,96 @@ QDialog {
     font-family: 'Segoe UI Variable Display', 'Segoe UI', -apple-system, 'SF Pro Display', 'Inter', sans-serif;
 }
 
-/* ─── Zone 1: Spotlight Hero Input (Borderless) ─────────────── */
+/* ─── Context Tag Row ────────────────────────────────────────── */
 
-QLineEdit#spotlightInput {
-    background: transparent;
+QLabel#contextLabel {
+    color: #86868B;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+QPushButton#actionTag {
+    background: rgba(255, 255, 255, 0.05);
+    color: #A1A1A6;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 2px 10px;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+QPushButton#actionTag:hover {
+    background: rgba(255, 255, 255, 0.12);
     color: #F5F5F7;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+QPushButton#actionTag:pressed {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+QPushButton#pinTag {
+    background: transparent;
+    color: #636366;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    padding: 2px 8px;
+    font-size: 10px;
+    font-weight: 500;
+}
+
+QPushButton#pinTag:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #A1A1A6;
+}
+
+QPushButton#pinTag:checked {
+    background: rgba(0, 113, 227, 0.20);
+    color: #0A84FF;
+    border: 1px solid rgba(10, 132, 255, 0.35);
+}
+
+/* ─── Chat Input Capsule ─────────────────────────────────────── */
+
+QFrame#chatInputFrame {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 14px;
+}
+
+QLineEdit#chatInput {
+    background: transparent;
+    color: #FFFFFF;
     border: none;
-    padding: 6px 0px;
-    font-size: 16px;
+    padding: 8px 2px;
+    font-size: 14px;
     font-weight: 400;
     selection-background-color: rgba(0, 113, 227, 0.45);
 }
 
-QLineEdit#spotlightInput::placeholder {
+QLineEdit#chatInput::placeholder {
     color: #636366;
-    font-size: 15px;
-    font-weight: 300;
+    font-size: 13px;
+    font-weight: 400;
 }
 
-QPushButton#sendBtn {
+QPushButton#chatSendBtn {
     background: rgba(255, 255, 255, 0.08);
-    color: #A1A1A6;
-    border: 1px solid rgba(255, 255, 255, 0.10);
-    border-radius: 7px;
-    padding: 4px 12px;
+    color: #8E8E93;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 5px 12px;
     font-size: 12px;
     font-weight: 600;
-    min-height: 22px;
+    min-height: 20px;
 }
 
-QPushButton#sendBtn:hover {
+QPushButton#chatSendBtn:hover {
     background: #0071E3;
     color: #FFFFFF;
     border: 1px solid #0A84FF;
 }
 
-QPushButton#sendBtn:pressed {
+QPushButton#chatSendBtn:pressed {
     background: #0056CC;
-}
-
-/* ─── Hairline Divider ───────────────────────────────────────── */
-
-QFrame#hairlineDivider {
-    background: rgba(255, 255, 255, 0.08);
-    border: none;
-    max-height: 1px;
-}
-
-/* ─── Zone 2: Context & Content Row ──────────────────────────── */
-
-QLabel#contextLabel {
-    color: #98989D;
-    font-size: 12px;
-    font-weight: 400;
-    line-height: 1.4;
-}
-
-QPushButton#pillBtn {
-    background: rgba(255, 255, 255, 0.06);
-    color: #D1D1D6;
-    border: 1px solid rgba(255, 255, 255, 0.09);
-    border-radius: 9px;
-    padding: 4px 12px;
-    font-size: 11px;
-    font-weight: 500;
-}
-
-QPushButton#pillBtn:hover {
-    background: rgba(255, 255, 255, 0.14);
-    color: #FFFFFF;
-    border: 1px solid rgba(255, 255, 255, 0.20);
-}
-
-QPushButton#pillBtn:pressed {
-    background: rgba(255, 255, 255, 0.08);
-}
-
-/* ─── Zone 3: Footer Row ─────────────────────────────────────── */
-
-QLabel#kbdKey {
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.09);
-    border-radius: 4px;
-    color: #636366;
-    font-size: 10px;
-    font-weight: 600;
-    padding: 1px 5px;
-}
-
-QLabel#kbdDesc {
-    color: #48484A;
-    font-size: 10px;
-    font-weight: 400;
-}
-
-QPushButton#pinBtn {
-    background: transparent;
-    color: #48484A;
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 6px;
-    padding: 2px 10px;
-    font-size: 10px;
-    font-weight: 500;
-}
-
-QPushButton#pinBtn:hover {
-    background: rgba(255, 255, 255, 0.08);
-    color: #A1A1A6;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-}
-
-QPushButton#pinBtn:checked {
-    background: rgba(0, 113, 227, 0.15);
-    color: #0A84FF;
-    border: 1px solid rgba(10, 132, 255, 0.30);
 }

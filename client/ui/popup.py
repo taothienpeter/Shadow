@@ -200,6 +200,7 @@ class FloatingPopup(QDialog):
 
         self.root_layout.addWidget(self.input_frame)
 
+        self.input_field.installEventFilter(self)
         self.installEventFilter(self)
 
     # ── Styles ──────────────────────────────────────────────────
@@ -274,6 +275,7 @@ class FloatingPopup(QDialog):
     def _on_fade_out_done(self):
         self.hide()
         self._voice_mode = False
+        self.input_field.clear()
         self.input_field.setPlaceholderText("Ask Shadow or type a message...")
         self.update()
 
@@ -301,6 +303,15 @@ class FloatingPopup(QDialog):
         if not text:
             return
         self.input_field.clear()
+
+        # Quick restart command
+        if text.lower() in ("/restart", "/r", "restart"):
+            import sys
+            from PyQt6.QtCore import QProcess
+            self._set_status("Restarting...", "working")
+            QTimer.singleShot(150, lambda: (QProcess.startDetached(sys.executable, sys.argv), QApplication.quit()))
+            return
+
         self._set_status("Thinking...", "working")
 
         if self.api_client and self._async_runner:
@@ -374,6 +385,19 @@ class FloatingPopup(QDialog):
     # ── Events ──────────────────────────────────────────────────
 
     def eventFilter(self, obj, event):
+        if obj == self.input_field and event.type() == QEvent.Type.KeyPress:
+            # Prevent Alt+Q from being typed into the input field
+            if event.modifiers() & Qt.KeyboardModifier.AltModifier:
+                if event.key() == Qt.Key.Key_Q:
+                    self.fade_out()
+                    return True
+                elif event.key() == Qt.Key.Key_X:
+                    self.show_voice_mode()
+                    return True
+            elif event.key() == Qt.Key.Key_Escape:
+                self.fade_out()
+                return True
+
         if event.type() == QEvent.Type.WindowDeactivate:
             if not self._pinned and self.isVisible() and not self._is_initializing:
                 QTimer.singleShot(150, self._maybe_hide)
@@ -384,6 +408,10 @@ class FloatingPopup(QDialog):
             self.fade_out()
 
     def keyPressEvent(self, event):
+        if event.modifiers() & Qt.KeyboardModifier.AltModifier and event.key() == Qt.Key.Key_Q:
+            self.fade_out()
+            event.accept()
+            return
         if event.key() == Qt.Key.Key_Escape:
             self.fade_out()
         elif event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):

@@ -36,6 +36,7 @@ class TrayApp(QObject):
     server_toggled = pyqtSignal(bool)
     script_run_requested = pyqtSignal(int)  # script index
     notification_toggled = pyqtSignal(bool)  # enabled state
+    hotkeys_changed = pyqtSignal(dict)  # new hotkeys config mapping
     quit_requested = pyqtSignal()
 
     def __init__(self, popup, notification_listener, config):
@@ -54,6 +55,8 @@ class TrayApp(QObject):
         app_data_dir = self._get_app_data_dir()
         self._scripts_config_path = app_data_dir / "scripts_config.json"
         self._notification_queue_path = app_data_dir / "notification_queue.json"
+        self._hotkeys_config_path = app_data_dir / "hotkeys_config.json"
+        self._hotkeys = self._load_hotkeys()
 
         # UI
         self._tray_icon = QSystemTrayIcon(self._create_icon())
@@ -119,12 +122,25 @@ class TrayApp(QObject):
             show_hide_action.triggered.connect(self._emit_toggle_popup)
             menu.addAction(show_hide_action)
 
+            # Restart
+            restart_action = QAction("Restart", self)
+            restart_action.triggered.connect(self._restart_app)
+            menu.addAction(restart_action)
+
             # Quit
             quit_action = QAction("Quit", self)
             quit_action.triggered.connect(self._emit_quit)
             menu.addAction(quit_action)
         except Exception as e:
             print(f"Error building tray menu: {e}")
+
+    def _restart_app(self):
+        """Restart the assistant application."""
+        import sys
+        from PyQt6.QtCore import QProcess
+        from PyQt6.QtWidgets import QApplication
+        QProcess.startDetached(sys.executable, sys.argv)
+        QApplication.quit()
 
     def _build_server_menu(self, menu: QMenu):
         """Build the server configuration submenu."""
@@ -165,30 +181,85 @@ class TrayApp(QObject):
         except Exception as e:
             print(f"Error building scripts menu: {e}")
 
+    def _load_hotkeys(self) -> Dict[str, str]:
+        """Load hotkeys mapping from json or config defaults."""
+        default = {
+            "hotkey_popup": getattr(self._config, "hotkey_popup", "<alt>+q"),
+            "hotkey_voice": getattr(self._config, "hotkey_voice", "<alt>+x"),
+            "hotkey_context": getattr(self._config, "hotkey_context", "<alt>+c"),
+        }
+        try:
+            if self._hotkeys_config_path.exists():
+                with open(self._hotkeys_config_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    default.update(data)
+        except Exception as e:
+            print(f"Error loading hotkeys config: {e}")
+        return default
+
+    def get_current_hotkeys(self) -> Dict[str, str]:
+        """Return the current active hotkeys mapping."""
+        return dict(self._hotkeys)
+
     def _build_hotkeys_menu(self, menu: QMenu):
         """Build the hotkeys display submenu."""
         try:
-            # Static hotkey display (from config/mapping)
-            q_action = QAction("Alt+Q  →  Toggle Popup", self)
-            q_action.setEnabled(False)
-            menu.addAction(q_action)
-
-            x_action = QAction("Alt+X  →  Voice Input Mode", self)
-            x_action.setEnabled(False)
-            menu.addAction(x_action)
-
-            c_action = QAction("Alt+C  →  Run Script (Alt+C)", self)
-            c_action.setEnabled(False)
-            menu.addAction(c_action)
-
-            menu.addSeparator()
-
-            # Placeholder for future hotkey customization
-            change_action = QAction("Change Hotkeys...", self)
-            change_action.setEnabled(False)  # Not implemented yet
-            menu.addAction(change_action)
+            self._hotkeys_menu = menu
+            self._rebuild_hotkeys_menu()
         except Exception as e:
             print(f"Error building hotkeys menu: {e}")
+
+    def _rebuild_hotkeys_menu(self):
+        """Rebuild hotkey menu items reflecting active configuration."""
+        if not hasattr(self, "_hotkeys_menu"):
+            return
+        try:
+            self._hotkeys_menu.clear()
+
+            def format_key(k: str) -> str:
+                return " + ".join([p.strip("<>").upper() for p in k.split("+") if p.strip()])
+
+            p_str = format_key(self._hotkeys.get("hotkey_popup", "<alt>+q"))
+            v_str = format_key(self._hotkeys.get("hotkey_voice", "<alt>+x"))
+            c_str = format_key(self._hotkeys.get("hotkey_context", "<alt>+c"))
+
+            q_action = QAction(f"{p_str}  →  Toggle Popup", self)
+            q_action.setEnabled(False)
+            self._hotkeys_menu.addAction(q_action)
+
+            x_action = QAction(f"{v_str}  →  Voice Input Mode", self)
+            x_action.setEnabled(False)
+            self._hotkeys_menu.addAction(x_action)
+
+            c_action = QAction(f"{c_str}  →  Analyze Context", self)
+            c_action.setEnabled(False)
+            self._hotkeys_menu.addAction(c_action)
+
+            self._hotkeys_menu.addSeparator()
+
+            change_action = QAction("Change Hotkeys...", self)
+            change_action.triggered.connect(self._on_change_hotkeys)
+            self._hotkeys_menu.addAction(change_action)
+        except Exception as e:
+            print(f"Error rebuilding hotkeys menu: {e}")
+
+    def _on_change_hotkeys(self):
+        """Open hotkeys configuration dialog."""
+        try:
+            from client.ui.hotkey_dialog import HotkeySettingsDialog
+            dialog = HotkeySettingsDialog(self._hotkeys_config_path, self._hotkeys)
+            dialog.hotkeys_updated.connect(self._on_hotkeys_updated)
+            dialog.exec()
+        except Exception as e:
+            print(f"Error opening hotkey dialog: {e}")
+            self.show_message("Hotkey Error", f"Failed to open settings: {e}", 4000)
+
+    def _on_hotkeys_updated(self, new_hotkeys: dict):
+        """Handle updated hotkeys from dialog."""
+        self._hotkeys = new_hotkeys
+        self._rebuild_hotkeys_menu()
+        self.hotkeys_changed.emit(new_hotkeys)
+        self.show_message("Hotkeys Updated", "New shortcuts applied immediately!", 3000)
 
     def _build_notifications_menu(self, menu: QMenu):
         """Build the notifications submenu."""

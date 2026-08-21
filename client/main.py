@@ -125,12 +125,25 @@ def main():
     context_collector.context_ready.connect(_on_context_ready)
     context_collector.context_error.connect(_on_context_error)
 
-    # Hotkeys
-    hotkeys = HotkeyManager({
-        "<alt>+q": popup.toggle_requested.emit,
-        "<alt>+x": popup.voice_mode_requested.emit,
-        "<alt>+c": context_collector.capture_and_analyze,
-    })
+    # Hotkeys setup with initial mapping from tray (persisted config)
+    def _build_hotkey_map(cfg: dict) -> dict:
+        mapping = {}
+        if "hotkey_popup" in cfg and cfg["hotkey_popup"]:
+            mapping[cfg["hotkey_popup"]] = popup.toggle_requested.emit
+        if "hotkey_voice" in cfg and cfg["hotkey_voice"]:
+            mapping[cfg["hotkey_voice"]] = popup.voice_mode_requested.emit
+        if "hotkey_context" in cfg and cfg["hotkey_context"]:
+            mapping[cfg["hotkey_context"]] = context_collector.capture_and_analyze
+        return mapping
+
+    initial_hotkeys = _build_hotkey_map(tray.get_current_hotkeys())
+    hotkeys = HotkeyManager(initial_hotkeys)
+
+    def _on_hotkeys_changed(new_cfg: dict):
+        new_map = _build_hotkey_map(new_cfg)
+        hotkeys.update_callbacks(new_map)
+
+    tray.hotkeys_changed.connect(_on_hotkeys_changed)
 
     def cleanup():
         """Clean shutdown of all components."""

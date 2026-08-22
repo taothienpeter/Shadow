@@ -6,6 +6,7 @@ coroutines without creating their own one-shot event loops.
 """
 
 import asyncio
+import concurrent.futures
 import threading
 from typing import Coroutine, Any
 
@@ -42,7 +43,7 @@ class AsyncRunner:
         self._thread.start()
         self._started = True
 
-    def run_coro(self, coro: Coroutine) -> asyncio.Future:
+    def run_coro(self, coro: Coroutine) -> concurrent.futures.Future:
         """
         Submit a coroutine to run on the background event loop.
 
@@ -50,7 +51,7 @@ class AsyncRunner:
             coro: The coroutine to execute
 
         Returns:
-            asyncio.Future: A future that will hold the result
+            concurrent.futures.Future: A future that will hold the result
         """
         if not self._started:
             raise RuntimeError("AsyncRunner must be started before submitting coroutines")

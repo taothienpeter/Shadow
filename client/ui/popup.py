@@ -67,7 +67,6 @@ class FloatingPopup(QDialog):
 
     # Signals
     toggle_requested = pyqtSignal()
-    voice_mode_requested = pyqtSignal()
     set_context_text_requested = pyqtSignal(str)
     set_input_text_requested = pyqtSignal(str)
     clear_input_requested = pyqtSignal()
@@ -84,10 +83,8 @@ class FloatingPopup(QDialog):
         self.api_client = api_client
         self._async_runner = async_runner
         self._pinned = False
-        self._voice_mode = False
         self._drag_pos = None
         self._last_toggle_time = 0
-        self._last_voice_mode_time = 0
         self._last_show_time = 0
         self._debounce_interval = 0.3
         self._is_initializing = False
@@ -100,7 +97,6 @@ class FloatingPopup(QDialog):
         self._apply_styles()
 
         self.toggle_requested.connect(self.toggle)
-        self.voice_mode_requested.connect(self.show_voice_mode)
         self.set_context_text_requested.connect(self.set_context_text)
         self.set_input_text_requested.connect(self.set_input_text)
         self.clear_input_requested.connect(self.clear_input)
@@ -303,7 +299,6 @@ class FloatingPopup(QDialog):
 
     def _on_fade_out_done(self):
         self.hide()
-        self._voice_mode = False
         self.input_field.clear()
         self.input_field.setPlaceholderText("Ask Shadow or type a message...")
         self.update()
@@ -314,16 +309,6 @@ class FloatingPopup(QDialog):
             return
         self._last_toggle_time = now
         self.fade_out() if self.isVisible() else self.show_at_cursor()
-
-    def show_voice_mode(self):
-        now = time.time()
-        if now - self._last_voice_mode_time < self._debounce_interval:
-            return
-        self._last_voice_mode_time = now
-        self._voice_mode = True
-        self.input_field.setPlaceholderText("Listening to voice...")
-        self.show_at_cursor()
-        self.update()
 
     # ── Actions ─────────────────────────────────────────────────
 
@@ -553,9 +538,6 @@ class FloatingPopup(QDialog):
                 if event.key() == Qt.Key.Key_Q:
                     self.fade_out()
                     return True
-                elif event.key() == Qt.Key.Key_X:
-                    self.show_voice_mode()
-                    return True
             elif event.key() == Qt.Key.Key_Escape:
                 self.fade_out()
                 return True
@@ -563,6 +545,7 @@ class FloatingPopup(QDialog):
         if event.type() == QEvent.Type.WindowDeactivate:
             if not self._pinned and self.isVisible() and not self._is_initializing:
                 QTimer.singleShot(150, self._maybe_hide)
+            return super().eventFilter(obj, event)
         return super().eventFilter(obj, event)
 
     def _maybe_hide(self):
@@ -615,19 +598,11 @@ class FloatingPopup(QDialog):
         p.setBrush(QColor(22, 22, 26, 245))
 
         # Rim light
-        if self._voice_mode:
-            grad = QLinearGradient(body.topLeft(), body.bottomRight())
-            grad.setColorAt(0.0, QColor(0, 113, 227, 200))
-            grad.setColorAt(0.35, QColor(175, 82, 222, 200))
-            grad.setColorAt(0.65, QColor(255, 45, 85, 200))
-            grad.setColorAt(1.0, QColor(50, 173, 230, 200))
-            p.setPen(QPen(QBrush(grad), 1.5))
-        else:
-            grad = QLinearGradient(body.topLeft(), body.bottomLeft())
-            grad.setColorAt(0.0, QColor(255, 255, 255, 45))
-            grad.setColorAt(0.4, QColor(255, 255, 255, 18))
-            grad.setColorAt(1.0, QColor(255, 255, 255, 8))
-            p.setPen(QPen(QBrush(grad), 0.8))
+        grad = QLinearGradient(body.topLeft(), body.bottomLeft())
+        grad.setColorAt(0.0, QColor(255, 255, 255, 45))
+        grad.setColorAt(0.4, QColor(255, 255, 255, 18))
+        grad.setColorAt(1.0, QColor(255, 255, 255, 8))
+        p.setPen(QPen(QBrush(grad), 0.8))
 
         p.drawRoundedRect(body, self.BORDER_RADIUS, self.BORDER_RADIUS)
 

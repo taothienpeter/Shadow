@@ -115,7 +115,6 @@ class HotkeySettingsDialog(QDialog):
 
     DEFAULT_HOTKEYS = {
         "hotkey_popup": "<alt>+q",
-        "hotkey_voice": "<alt>+x",
         "hotkey_context": "<alt>+c"
     }
 
@@ -131,7 +130,7 @@ class HotkeySettingsDialog(QDialog):
 
     def _setup_ui(self):
         self.setWindowTitle("Configure Global Hotkeys")
-        self.setFixedSize(480, 360)
+        self.setFixedSize(480, 320)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
 
         root = QVBoxLayout(self)
@@ -162,14 +161,7 @@ class HotkeySettingsDialog(QDialog):
             self._current_hotkeys.get("hotkey_popup", "<alt>+q")
         )
 
-        # 2. Voice Input
-        self.voice_input = self._create_row(
-            form_layout,
-            "Voice Mode",
-            self._current_hotkeys.get("hotkey_voice", "<alt>+x")
-        )
-
-        # 3. Context Analysis
+        # 2. Context Analysis
         self.context_input = self._create_row(
             form_layout,
             "Analyze Screen Context",
@@ -300,16 +292,14 @@ class HotkeySettingsDialog(QDialog):
 
     def _on_reset_defaults(self):
         self.popup_input.set_hotkey_string(self.DEFAULT_HOTKEYS["hotkey_popup"])
-        self.voice_input.set_hotkey_string(self.DEFAULT_HOTKEYS["hotkey_voice"])
         self.context_input.set_hotkey_string(self.DEFAULT_HOTKEYS["hotkey_context"])
 
     def _on_save(self):
         p = self.popup_input.get_hotkey_string()
-        v = self.voice_input.get_hotkey_string()
         c = self.context_input.get_hotkey_string()
 
         # Validation: check for duplicates
-        keys = [k for k in (p, v, c) if k]
+        keys = [k for k in (p, c) if k]
         if len(keys) != len(set(keys)):
             QMessageBox.warning(
                 self,
@@ -320,7 +310,6 @@ class HotkeySettingsDialog(QDialog):
 
         new_config = {
             "hotkey_popup": p or self.DEFAULT_HOTKEYS["hotkey_popup"],
-            "hotkey_voice": v or self.DEFAULT_HOTKEYS["hotkey_voice"],
             "hotkey_context": c or self.DEFAULT_HOTKEYS["hotkey_context"],
         }
 

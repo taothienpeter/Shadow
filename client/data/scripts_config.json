@@ -1,16 +1,16 @@
 {
   "scripts": [
     {
-      "name": "lms",
       "command": "https://lms.hcmut.edu.vn/my/courses.php",
       "cwd": "",
-      "hotkey": "<alt>+1"
+      "hotkey": "<alt>+1",
+      "name": "lms"
     },
     {
-      "name": "Home Assistant",
       "command": "https://homeassistant.taothienpeter.io.vn/home/overview",
       "cwd": "",
-      "hotkey": "<alt>+2"
+      "hotkey": "<alt>+2",
+      "name": "Home Assistant"
     },
     {
       "command": "https://n8n.taothienpeter.io.vn/home/workflows",
@@ -35,6 +35,12 @@
       "cwd": "",
       "hotkey": "",
       "name": "AGVstudio"
+    },
+    {
+      "name": "notion",
+      "command": "C:\\Users\\tao\\AppData\\Local\\Programs\\Notion\\Notion.exe",
+      "cwd": "",
+      "hotkey": "<alt>+3"
     }
   ]
 }

@@ -181,8 +181,7 @@ class ContextCollector(QObject):
             "window_title": window_title,
             "screen_resolution": screen_res,
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "source": "desktop_assistant",
-            "voice_text": None  # Voice input not implemented yet
+            "source": "desktop_assistant"
         }
 
         return payload

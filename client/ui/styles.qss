@@ -92,12 +92,6 @@ QPushButton#chatSendBtn {
     min-height: 20px;
 }
 
-QPushButton#chatSendBtn:hover {
-    background: #0071E3;
-    color: #FFFFFF;
-    border: 1px solid #0A84FF;
-}
-
 QPushButton#chatSendBtn:pressed {
     background: #0056CC;
 }

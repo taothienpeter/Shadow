@@ -5,7 +5,7 @@ Main entrypoint for the AI Desktop Assistant.
 Orchestrates all components:
 - Qt application and system tray
 - API client for server communication
-- Floating popup UI (search/compose, context display, voice mode)
+- Floating popup UI (search/compose, context display)
 - Screenshot capture
 - Context collection (screenshot + app info → API)
 - Notification listener (inbound HTTP from n8n via Tailscale)
@@ -14,6 +14,7 @@ Orchestrates all components:
 
 import sys
 import os
+import signal
 
 if sys.platform == "win32":
     try:
@@ -30,13 +31,15 @@ if parent_dir not in sys.path:
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import QTimer
 
-from client.core.async_runner import AsyncRunner
-from client.core.hotkey import HotkeyManager
-from client.core.api_client import ApiClient
-from client.core.screenshot import ScreenshotCapture
-from client.core.context_collector import ContextCollector
-from client.core.notification_listener import NotificationListener
-from client.core.tray_app import TrayApp
+from client.core import (
+    ApiClient,
+    AsyncRunner,
+    ContextCollector,
+    HotkeyManager,
+    NotificationListener,
+    ScreenshotCapture,
+    TrayApp,
+)
 from client.ui.popup import FloatingPopup
 from client.config import ClientConfig
 
@@ -67,7 +70,7 @@ def main():
         auth_token=config.n8n_auth_token,
     )
 
-    # System tray app (replaces inline QSystemTrayIcon setup)
+    # System tray app
     tray = TrayApp(popup, notification_listener, config)
 
     # Sync scripts and config path to popup
@@ -78,8 +81,6 @@ def main():
     # Connect tray signals to popup/actions
     tray.toggle_popup_requested.connect(popup.toggle_requested.emit)
     tray.quit_requested.connect(app.quit)
-    # For backward compatibility with existing popup signals
-    # (TrayApp doesn't emit popup_show_requested yet, we'll use toggle for now)
 
     # Input layer
     screenshot = ScreenshotCapture()
@@ -136,8 +137,6 @@ def main():
         # 1. System hotkeys
         if "hotkey_popup" in cfg and cfg["hotkey_popup"]:
             mapping[cfg["hotkey_popup"]] = popup.toggle_requested.emit
-        if "hotkey_voice" in cfg and cfg["hotkey_voice"]:
-            mapping[cfg["hotkey_voice"]] = popup.voice_mode_requested.emit
         if "hotkey_context" in cfg and cfg["hotkey_context"]:
             mapping[cfg["hotkey_context"]] = context_collector.capture_and_analyze
 
@@ -188,7 +187,6 @@ def main():
     # Connect cleanup to app quit
     app.aboutToQuit.connect(cleanup)
 
-    import signal
     # Allow Python to catch Ctrl+C and gracefully quit
     signal.signal(signal.SIGINT, lambda sig, frame: app.quit())
     

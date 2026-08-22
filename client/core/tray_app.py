@@ -42,10 +42,10 @@ class TrayApp(QObject):
     hotkeys_changed = pyqtSignal(dict)  # new hotkeys config mapping
     quit_requested = pyqtSignal()
 
-    def __init__(self, popup, notification_listener, config):
+    def __init__(self, app, config_loader, config):
         super().__init__()
-        self._popup = popup
-        self._notification_listener = notification_listener
+        self._app = app
+        self._config_loader = config_loader
         self._config = config
 
         # State
@@ -188,7 +188,6 @@ class TrayApp(QObject):
         """Load hotkeys mapping from json or config defaults."""
         default = {
             "hotkey_popup": getattr(self._config, "hotkey_popup", "<alt>+q"),
-            "hotkey_voice": getattr(self._config, "hotkey_voice", "<alt>+x"),
             "hotkey_context": getattr(self._config, "hotkey_context", "<alt>+c"),
         }
         try:
@@ -228,16 +227,11 @@ class TrayApp(QObject):
                 return " + ".join([p.strip("<>").upper() for p in k.split("+") if p.strip()])
 
             p_str = format_key(self._hotkeys.get("hotkey_popup", "<alt>+q"))
-            v_str = format_key(self._hotkeys.get("hotkey_voice", "<alt>+x"))
             c_str = format_key(self._hotkeys.get("hotkey_context", "<alt>+c"))
 
             q_action = QAction(f"{p_str}  →  Toggle Popup", self)
             q_action.setEnabled(False)
             self._hotkeys_menu.addAction(q_action)
-
-            x_action = QAction(f"{v_str}  →  Voice Input Mode", self)
-            x_action.setEnabled(False)
-            self._hotkeys_menu.addAction(x_action)
 
             c_action = QAction(f"{c_str}  →  Analyze Context", self)
             c_action.setEnabled(False)
@@ -288,6 +282,8 @@ class TrayApp(QObject):
         self._rebuild_hotkeys_menu()
         self.hotkeys_changed.emit(new_hotkeys)
         self.show_message("Hotkeys Updated", "New shortcuts applied immediately!", 3000)
+
+
 
     def _build_notifications_menu(self, menu: QMenu):
         """Build the notifications submenu."""

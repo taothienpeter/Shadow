@@ -15,10 +15,8 @@ def get_default_data_dir() -> Path:
 
 class ClientConfig(BaseSettings):
     screenshot_quality: int = 70
-    voice_sample_rate: int = 16000
     theme: str = "dark"  # "dark" | "light"
     hotkey_popup: str = "<alt>+q"
-    hotkey_voice: str = "<alt>+x"
     hotkey_context: str = "<alt>+c"
     # Notification listener settings
     notification_port: int = 8080

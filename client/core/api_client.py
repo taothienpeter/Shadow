@@ -76,7 +76,9 @@ def _retry_on_server_error(max_retries: int = 2, base_delay: float = 0.5):
                         await asyncio.sleep(delay)
                     else:
                         raise
-            raise last_exc  # should not reach, but safety net
+            if last_exc is not None:
+                raise last_exc
+            raise ApiError("Retry loop exhausted without result")
 
         return wrapper
 
@@ -96,17 +98,29 @@ class ApiClient:
     def __init__(
         self,
         webhook_url: str,
-        timeout: float = 30.0,
+        timeout: httpx.Timeout | float | None = None,
         api_key: str | None = None,
     ):
-        self._webhook_url = webhook_url.rstrip("/")
-        self._default_timeout = timeout
+        self._webhook_url = (webhook_url or "").rstrip("/")
+        if isinstance(timeout, (int, float)):
+            self._default_timeout = httpx.Timeout(
+                connect=5.0, read=float(timeout), write=10.0, pool=5.0
+            )
+        elif isinstance(timeout, httpx.Timeout):
+            self._default_timeout = timeout
+        else:
+            self._default_timeout = self._DEFAULT_TIMEOUT
+
         self._api_key = api_key
         self._client: httpx.AsyncClient | None = None
 
     # -- lifecycle ---------------------------------------------------------
 
     async def _get_client(self) -> httpx.AsyncClient:
+        if not self._webhook_url:
+            raise ApiConnectionError(
+                "N8N_WEBHOOK_URL is not configured in .env. Please set a valid webhook URL."
+            )
         if self._client is None or self._client.is_closed:
             headers = {}
             if self._api_key:
@@ -195,21 +209,18 @@ class ApiClient:
             json=payload,
             timeout=timeout,
         )
-        return resp.json()
+        try:
+            return resp.json()
+        except Exception:
+            # Fallback for plain-text or empty responses from n8n webhook
+            text = resp.text.strip() if resp.text else ""
+            return {"response": text or "OK", "raw": text, "status_code": resp.status_code}
 
     @staticmethod
     def extract_response_text(response: dict) -> str:
-        """Extract meaningful display text from an n8n response dict.
-
-        Tries common response field names in priority order.
-        Falls back to the string representation of the entire dict.
-
-        Args:
-            response: The JSON response dict from the n8n webhook.
-
-        Returns:
-            A human-readable string extracted from the response.
-        """
+        """Extract meaningful display text from an n8n response dict."""
+        if not isinstance(response, dict):
+            return str(response or "")
         for key in ("response", "message", "text", "answer", "reply", "content", "error"):
             value = response.get(key)
             if isinstance(value, str) and value.strip():

@@ -1,17 +1,19 @@
 """Floating Popup Window — Ultra-sleek Conversational AI Assistant input bar (Apple Dark Theme)."""
 
 import os
+import sys
 import time
-import ctypes
+import json
+from pathlib import Path
 from datetime import datetime, timezone
-from ctypes import wintypes
+
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QLineEdit, QApplication, QWidget, QFrame
+    QLineEdit, QApplication, QWidget, QFrame, QMenu
 )
 from PyQt6.QtCore import (
     Qt, QTimer, QPropertyAnimation, QEasingCurve, QEvent,
-    pyqtSignal, QAbstractAnimation, QRectF
+    pyqtSignal, QAbstractAnimation, QRectF, QProcess
 )
 from PyQt6.QtGui import (
     QCursor, QPainter, QColor, QPen, QFont, QLinearGradient,
@@ -19,37 +21,43 @@ from PyQt6.QtGui import (
 )
 
 from client.core.api_client import ApiClient
+from client.core.script_runner import run_script
+
+IS_WINDOWS = sys.platform == "win32"
 
 # ── Win32 structures for focus forcing ──────────────────────────
-ULONG_PTR = ctypes.c_size_t
+if IS_WINDOWS:
+    import ctypes
+    from ctypes import wintypes
+    ULONG_PTR = ctypes.c_size_t
 
-class MOUSEINPUT(ctypes.Structure):
-    _fields_ = [("dx", wintypes.LONG), ("dy", wintypes.LONG),
-                ("mouseData", wintypes.DWORD), ("dwFlags", wintypes.DWORD),
-                ("time", wintypes.DWORD), ("dwExtraInfo", ULONG_PTR)]
+    class MOUSEINPUT(ctypes.Structure):
+        _fields_ = [("dx", wintypes.LONG), ("dy", wintypes.LONG),
+                    ("mouseData", wintypes.DWORD), ("dwFlags", wintypes.DWORD),
+                    ("time", wintypes.DWORD), ("dwExtraInfo", ULONG_PTR)]
 
-class KEYBDINPUT(ctypes.Structure):
-    _fields_ = [("wVk", wintypes.WORD), ("wScan", wintypes.WORD),
-                ("dwFlags", wintypes.DWORD), ("time", wintypes.DWORD),
-                ("dwExtraInfo", ULONG_PTR)]
+    class KEYBDINPUT(ctypes.Structure):
+        _fields_ = [("wVk", wintypes.WORD), ("wScan", wintypes.WORD),
+                    ("dwFlags", wintypes.DWORD), ("time", wintypes.DWORD),
+                    ("dwExtraInfo", ULONG_PTR)]
 
-class HARDWAREINPUT(ctypes.Structure):
-    _fields_ = [("uMsg", wintypes.DWORD), ("wParamL", wintypes.WORD),
-                ("wParamH", wintypes.WORD)]
+    class HARDWAREINPUT(ctypes.Structure):
+        _fields_ = [("uMsg", wintypes.DWORD), ("wParamL", wintypes.WORD),
+                    ("wParamH", wintypes.WORD)]
 
-class INPUT_UNION(ctypes.Union):
-    _fields_ = [("mi", MOUSEINPUT), ("ki", KEYBDINPUT), ("hi", HARDWAREINPUT)]
+    class INPUT_UNION(ctypes.Union):
+        _fields_ = [("mi", MOUSEINPUT), ("ki", KEYBDINPUT), ("hi", HARDWAREINPUT)]
 
-class INPUT(ctypes.Structure):
-    _fields_ = [("type", wintypes.DWORD), ("union", INPUT_UNION)]
+    class INPUT(ctypes.Structure):
+        _fields_ = [("type", wintypes.DWORD), ("union", INPUT_UNION)]
 
-INPUT_KEYBOARD = 1
-KEYEVENTF_KEYUP = 0x0002
-VK_MENU = 0x12
-SPI_GETFOREGROUNDLOCKTIMEOUT = 0x2000
-SPI_SETFOREGROUNDLOCKTIMEOUT = 0x2001
-SPIF_SENDCHANGE = 0x02
-SW_RESTORE = 9
+    INPUT_KEYBOARD = 1
+    KEYEVENTF_KEYUP = 0x0002
+    VK_MENU = 0x12
+    SPI_GETFOREGROUNDLOCKTIMEOUT = 0x2000
+    SPI_SETFOREGROUNDLOCKTIMEOUT = 0x2001
+    SPIF_SENDCHANGE = 0x02
+    SW_RESTORE = 9
 
 
 # ── Main Widget ─────────────────────────────────────────────────
@@ -64,6 +72,8 @@ class FloatingPopup(QDialog):
     set_input_text_requested = pyqtSignal(str)
     clear_input_requested = pyqtSignal()
     response_received = pyqtSignal(dict)
+    script_executed = pyqtSignal(dict)
+    scripts_changed = pyqtSignal(list)
 
     BASE_WIDTH = 560
     BAR_HEIGHT = 96
@@ -82,6 +92,9 @@ class FloatingPopup(QDialog):
         self._debounce_interval = 0.3
         self._is_initializing = False
         self._current_context = ""
+        self._scripts: list = []
+        self._scripts_config_path = None
+        self._anim = None
 
         self._setup_ui()
         self._apply_styles()
@@ -96,32 +109,43 @@ class FloatingPopup(QDialog):
 
     def _force_focus(self):
         """Force window to foreground using Win32 SendInput technique."""
-        hwnd = int(self.winId())
-        if ctypes.windll.user32.GetForegroundWindow() == hwnd:
+        if not IS_WINDOWS:
+            self.raise_()
+            self.activateWindow()
             return
-        if ctypes.windll.user32.IsIconic(hwnd):
-            ctypes.windll.user32.ShowWindow(hwnd, SW_RESTORE)
 
-        inp = (INPUT * 2)()
-        inp[0].type = INPUT_KEYBOARD
-        inp[0].union.ki = KEYBDINPUT(VK_MENU, 0, 0, 0, 0)
-        inp[1].type = INPUT_KEYBOARD
-        inp[1].union.ki = KEYBDINPUT(VK_MENU, 0, KEYEVENTF_KEYUP, 0, 0)
-        ctypes.windll.user32.SendInput(2, ctypes.byref(inp), ctypes.sizeof(INPUT))
-
-        if ctypes.windll.user32.SetForegroundWindow(hwnd):
+        try:
+            hwnd = int(self.winId())
             if ctypes.windll.user32.GetForegroundWindow() == hwnd:
                 return
+            if ctypes.windll.user32.IsIconic(hwnd):
+                ctypes.windll.user32.ShowWindow(hwnd, SW_RESTORE)
 
-        timeout = ctypes.c_int(0)
-        zero = ctypes.c_int(0)
-        ctypes.windll.user32.SystemParametersInfoW(
-            SPI_GETFOREGROUNDLOCKTIMEOUT, 0, ctypes.byref(timeout), 0)
-        ctypes.windll.user32.SystemParametersInfoW(
-            SPI_SETFOREGROUNDLOCKTIMEOUT, 0, ctypes.byref(zero), SPIF_SENDCHANGE)
-        ctypes.windll.user32.SetForegroundWindow(hwnd)
-        ctypes.windll.user32.SystemParametersInfoW(
-            SPI_SETFOREGROUNDLOCKTIMEOUT, 0, ctypes.byref(timeout), SPIF_SENDCHANGE)
+            inp = (INPUT * 2)()
+            inp[0].type = INPUT_KEYBOARD
+            inp[0].union.ki = KEYBDINPUT(VK_MENU, 0, 0, 0, 0)
+            inp[1].type = INPUT_KEYBOARD
+            inp[1].union.ki = KEYBDINPUT(VK_MENU, 0, KEYEVENTF_KEYUP, 0, 0)
+            ctypes.windll.user32.SendInput(2, ctypes.byref(inp), ctypes.sizeof(INPUT))
+
+            if ctypes.windll.user32.SetForegroundWindow(hwnd):
+                if ctypes.windll.user32.GetForegroundWindow() == hwnd:
+                    return
+
+            timeout = ctypes.c_int(0)
+            zero = ctypes.c_int(0)
+            ctypes.windll.user32.SystemParametersInfoW(
+                SPI_GETFOREGROUNDLOCKTIMEOUT, 0, ctypes.byref(timeout), 0)
+            try:
+                ctypes.windll.user32.SystemParametersInfoW(
+                    SPI_SETFOREGROUNDLOCKTIMEOUT, 0, ctypes.byref(zero), SPIF_SENDCHANGE)
+                ctypes.windll.user32.SetForegroundWindow(hwnd)
+            finally:
+                ctypes.windll.user32.SystemParametersInfoW(
+                    SPI_SETFOREGROUNDLOCKTIMEOUT, 0, ctypes.byref(timeout), SPIF_SENDCHANGE)
+        except Exception as e:
+            self.raise_()
+            self.activateWindow()
 
     # ── Layout ──────────────────────────────────────────────────
 
@@ -169,6 +193,13 @@ class FloatingPopup(QDialog):
         self.note_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.note_btn.clicked.connect(lambda: self._on_context_action("note"))
         ctx_layout.addWidget(self.note_btn)
+
+        # Quick action: Scripts
+        self.scripts_btn = QPushButton("Scripts")
+        self.scripts_btn.setObjectName("actionTag")
+        self.scripts_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.scripts_btn.clicked.connect(self._show_scripts_menu)
+        ctx_layout.addWidget(self.scripts_btn)
 
         self.pin_btn = QPushButton("Pin")
         self.pin_btn.setObjectName("pinTag")
@@ -246,11 +277,9 @@ class FloatingPopup(QDialog):
         QTimer.singleShot(50, self._force_focus)
         QTimer.singleShot(100, lambda: self.input_field.setFocus())
 
-    # ── Show / Hide ─────────────────────────────────────────────
-
     def fade_in(self):
-        if hasattr(self, '_anim') and self._anim and self._anim.state() == QAbstractAnimation.State.Running:
-            return
+        if self._anim and self._anim.state() == QAbstractAnimation.State.Running:
+            self._anim.stop()
         self.setWindowOpacity(0.0)
         self.show()
         self._force_focus()
@@ -262,8 +291,8 @@ class FloatingPopup(QDialog):
         self._anim.start()
 
     def fade_out(self):
-        if hasattr(self, '_anim') and self._anim and self._anim.state() == QAbstractAnimation.State.Running:
-            return
+        if self._anim and self._anim.state() == QAbstractAnimation.State.Running:
+            self._anim.stop()
         self._anim = QPropertyAnimation(self, b"windowOpacity")
         self._anim.setDuration(120)
         self._anim.setStartValue(self.windowOpacity())
@@ -298,6 +327,110 @@ class FloatingPopup(QDialog):
 
     # ── Actions ─────────────────────────────────────────────────
 
+    def set_scripts(self, scripts: list, config_path=None):
+        """Update popup's scripts list and config path."""
+        self._scripts = list(scripts or [])
+        if config_path:
+            self._scripts_config_path = config_path
+
+    def _show_scripts_menu(self):
+        """Open quick scripts menu from the Scripts button."""
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background: #1C1C1E;
+                color: #FFFFFF;
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                border-radius: 10px;
+                padding: 6px;
+                font-family: 'Segoe UI', -apple-system, sans-serif;
+                font-size: 12px;
+            }
+            QMenu::item {
+                padding: 7px 18px 7px 12px;
+                border-radius: 6px;
+                margin: 2px 0px;
+            }
+            QMenu::item:selected {
+                background: rgba(0, 113, 227, 0.60);
+                color: #FFFFFF;
+            }
+            QMenu::separator {
+                height: 1px;
+                background: rgba(255, 255, 255, 0.08);
+                margin: 4px 6px;
+            }
+        """)
+
+        if not self._scripts:
+            empty_action = menu.addAction("No scripts configured")
+            empty_action.setEnabled(False)
+        else:
+            for idx, script in enumerate(self._scripts):
+                name = script.get("name", f"Script {idx+1}")
+                hk = script.get("hotkey", "").strip()
+                if hk:
+                    clean_hk = " + ".join([p.strip("<>").upper() for p in hk.split("+") if p.strip()])
+                    label = f"▶  {name}   [{clean_hk}]"
+                else:
+                    label = f"▶  {name}"
+                action = menu.addAction(label)
+                action.triggered.connect(lambda checked, s=script: self._run_script_by_data(s))
+
+        menu.addSeparator()
+        add_action = menu.addAction("+  Add New Script...")
+        add_action.triggered.connect(self._open_add_script_dialog)
+
+        manage_action = menu.addAction("⚙  Manage Scripts...")
+        manage_action.triggered.connect(self._open_script_manager)
+
+        # Popup directly under the scripts button
+        btn_pos = self.scripts_btn.mapToGlobal(self.scripts_btn.rect().bottomLeft())
+        menu.exec(btn_pos)
+
+    def _open_add_script_dialog(self):
+        """Open the Add Script dialog directly from popup."""
+        try:
+            from client.ui.script_dialog import ScriptEditDialog
+            dlg = ScriptEditDialog(parent=self)
+            if dlg.exec() == QDialog.DialogCode.Accepted:
+                new_data = dlg.get_data()
+                self._scripts.append(new_data)
+                cfg_path = self._scripts_config_path or Path("client/data/scripts_config.json")
+                cfg_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(cfg_path, "w", encoding="utf-8") as f:
+                    json.dump({"scripts": self._scripts}, f, indent=2)
+                self.scripts_changed.emit(self._scripts)
+                self._set_status(f"Added script: {new_data['name']}", "ready")
+        except Exception as e:
+            print(f"Error opening add script dialog from popup: {e}")
+
+    def _open_script_manager(self):
+        """Open the full ScriptManagerDialog."""
+        try:
+            from client.ui.script_dialog import ScriptManagerDialog
+            cfg_path = self._scripts_config_path or Path("client/data/scripts_config.json")
+            dlg = ScriptManagerDialog(cfg_path, self._scripts, parent=self)
+            dlg.scripts_updated.connect(self._on_scripts_updated_from_dialog)
+            dlg.exec()
+        except Exception as e:
+            print(f"Error opening script manager from popup: {e}")
+
+    def _on_scripts_updated_from_dialog(self, new_scripts: list):
+        self._scripts = new_scripts
+        self.scripts_changed.emit(new_scripts)
+
+    def _run_script_by_data(self, script: dict):
+        """Execute a script command, application, or URL and update status."""
+        name = script.get("name", "script")
+        self._set_status(f"Running {name}...", "working")
+        success, msg = run_script(script)
+        if success:
+            self._set_status(f"Executed: {name}", "ready")
+            self.script_executed.emit(script)
+        else:
+            self._set_status(f"Error: {msg}", "error")
+
     def _on_send(self):
         text = self.input_field.text().strip()
         if not text:
@@ -306,10 +439,39 @@ class FloatingPopup(QDialog):
 
         # Quick restart command
         if text.lower() in ("/restart", "/r", "restart"):
-            import sys
-            from PyQt6.QtCore import QProcess
             self._set_status("Restarting...", "working")
             QTimer.singleShot(150, lambda: (QProcess.startDetached(sys.executable, sys.argv), QApplication.quit()))
+            return
+
+        # Quick script menu trigger: /s, /scripts, /script, /run, /open
+        if text.lower() in ("/s", "/scripts", "/script", "/run", "/open"):
+            self._show_scripts_menu()
+            return
+
+        # Direct numeric index execution (e.g. typing "1", "2", "/1", "/2")
+        cleaned_num = text.lstrip("/")
+        if cleaned_num.isdigit():
+            idx = int(cleaned_num) - 1
+            if 0 <= idx < len(self._scripts):
+                self._run_script_by_data(self._scripts[idx])
+                return
+
+        # Script prefix execution: /s <name>, /run <name>, /open <name>, /script <name>
+        script_prefixes = ("/s ", "/script ", "/scripts ", "/run ", "/open ")
+        for pfx in script_prefixes:
+            if text.lower().startswith(pfx):
+                query = text[len(pfx):].strip().lower()
+                matched = [s for s in self._scripts if query in s.get("name", "").lower() or query in s.get("command", "").lower()]
+                if matched:
+                    self._run_script_by_data(matched[0])
+                else:
+                    self._set_status(f"No script matched '{query}'", "error")
+                return
+
+        # Direct exact match with existing script name (e.g. typing "n8n", "Task Manager")
+        direct_match = [s for s in self._scripts if s.get("name", "").strip().lower() == text.lower()]
+        if direct_match:
+            self._run_script_by_data(direct_match[0])
             return
 
         self._set_status("Thinking...", "working")

@@ -1,14 +1,40 @@
 {
   "scripts": [
     {
-      "name": "Task Manager",
-      "command": "taskmgr.exe",
-      "cwd": ""
+      "name": "lms",
+      "command": "https://lms.hcmut.edu.vn/my/courses.php",
+      "cwd": "",
+      "hotkey": "<alt>+1"
     },
     {
-      "name": "Command Prompt",
-      "command": "cmd.exe",
-      "cwd": ""
+      "name": "Home Assistant",
+      "command": "https://homeassistant.taothienpeter.io.vn/home/overview",
+      "cwd": "",
+      "hotkey": "<alt>+2"
+    },
+    {
+      "command": "https://n8n.taothienpeter.io.vn/home/workflows",
+      "cwd": "",
+      "hotkey": "",
+      "name": "n8n"
+    },
+    {
+      "command": "taskmgr.exe",
+      "cwd": "",
+      "hotkey": "",
+      "name": "Task Manager"
+    },
+    {
+      "command": "https://github.com/taothienpeter?tab=repositories",
+      "cwd": "",
+      "hotkey": "",
+      "name": "github"
+    },
+    {
+      "command": "http://localhost:8000/studio/",
+      "cwd": "",
+      "hotkey": "",
+      "name": "AGVstudio"
     }
   ]
 }

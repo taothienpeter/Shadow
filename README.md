@@ -1,110 +1,106 @@
-# AI Desktop Assistant
+# Shadow — AI Desktop Assistant
 
-An AI-powered desktop assistant with voice input, screen capture, context awareness, and n8n integration.
+A sleek, macOS / Apple-inspired AI-powered desktop assistant for Windows with screen context awareness, global hotkeys, automation script management, and n8n webhook integration.
 
 ## Features
 
-- **Floating Popup Interface**: Apple-inspired design that appears near your cursor
-- **Global Hotkeys**: Customizable keyboard shortcuts for quick access (Alt+Q/X/C)
-- **Voice Input**: Record and transcribe voice notes
-- **Screen Capture**: Capture and analyze screen content
-- **Context Awareness**: Understand what application you're using and what's on screen
-- **n8n Integration**: Communicate with n8n self-hosted instance via webhooks
-- **System Tray Integration**: Run in background with accessible menu
-- **Notes Management**: Create, view, search, and delete notes
+- **Floating Conversational Bar**: Apple frosted glass UI that appears smoothly at your cursor (`Alt+Q`)
+- **Global Hotkey Manager**: Fully customizable global keyboard shortcuts with key recording UI
+- **Screen & App Context Awareness**: Instant multi-monitor screenshot capture + active window inspection sent to n8n (`Alt+C`)
+- **Script & Automation Manager**: Quick launch cards for applications (`.exe`), Python scripts (`.py`), batch files (`.bat`/`.ps1`), and web URLs (`https://`)
+- **Inbound Notification Listener**: Built-in HTTP server listening on Tailscale/LAN to receive real-time POST notifications from n8n workflows
+- **System Tray Integration**: Background tray menu with server status, hotkey settings, notification muting & queue replay, script launcher, and restart controls
+
+---
 
 ## Installation
 
 1. **Prerequisites**:
-   - Python 3.8+
-   - Git (for cloning the repository)
+   - Windows 10/11 (or Linux/macOS with X11)
+   - Python 3.10+
 
 2. **Setup**:
    ```bash
    # Clone the repository
    git clone <repository-url>
-   cd <repository-directory>
+   cd shadow
 
    # Install dependencies
-   pip install -r client/requirements.txt
+   pip install -r requirements.txt
 
-   # Copy environment template and configure
-   copy client/env.example .env  # Windows
+   # Copy environment template
+   copy .env.example .env    # Windows
    # or
-   cp client/env.example .env    # Linux/Mac
-
-   # Edit .env file with your configuration
-   # Especially N8N_WEBHOOK_ID if you want to use n8n features
+   cp .env.example .env      # Linux/macOS
    ```
 
-## Configuration
+3. **Configure `.env`**:
+   Edit `.env` and set your n8n webhook URL:
+   ```ini
+   N8N_WEBHOOK_URL=https://webhook.your-domain.com/webhook/assistant
+   NOTIFICATION_PORT=8080
+   TAILSCALE_IP=0.0.0.0
+   ```
 
-Edit the `.env` file to configure the application:
-
-- `N8N_BASE_URL`: URL of your n8n self-hosted instance (default: http://localhost:5678)
-- `N8N_WEBHOOK_ID`: The webhook ID from your n8n workflow
-- `N8N_API_KEY`: Your n8n API key (if required)
-- `SERVER_URL`: URL of the backend API server (kept for compatibility)
-- `WS_URL`: WebSocket URL for real-time communication (kept for compatibility)
-- `OPENAI_API_KEY`: Your OpenAI API key (required for AI features)
-- `SCREENSHOT_QUALITY`: JPEG quality for screen captures (1-100)
-- `VOICE_SAMPLE_RATE`: Audio sample rate in Hz
-- `THEME`: UI theme (currently only "dark" is implemented)
+---
 
 ## Usage
 
-1. **Start Your n8n Instance** (if not already running):
+1. **Run the Assistant**:
    ```bash
-   # Assuming you have n8n installed and configured
-   n8n start
-   ```
-
-2. **Start the Application**:
-   ```bash
-   # From the project root
    python client/main.py
    ```
 
-3. **Using the Application**:
-   - Press `Alt+Q` to show/hide the popup
-   - Press `Alt+X` to activate voice input mode
-   - Press `Alt+C` to trigger your pre-configured n8n webhook
-   - Right-click the system tray icon for additional options
+2. **Default Shortcuts**:
+   - **`Alt+Q`**: Show / hide the floating assistant bar
+   - **`Alt+X`**: Open in voice mode
+   - **`Alt+C`**: Capture screen + active window context and send to n8n for analysis
 
-## System Tray Menu
+   *(Hotkeys can be customized via the Tray Menu → Hotkeys → Change Hotkeys...)*
 
-Right-clicking the system tray icon provides:
-- **Show Popup**: Display the main interface
-- **Hide Popup**: Hide the main interface
-- **Settings**: Open configuration (placeholder)
-- **Quit**: Exit the application completely
+3. **Floating Bar Commands**:
+   - Type any question or message and press **Enter** to chat with your n8n workflow
+   - Type `/s <name>`, `/run <name>`, or `/open <name>` to quickly run an automation script
+   - Type `/restart` or `/r` to immediately restart the application
+   - Click **Summarize** or **Note** to run contextual actions
 
-## Hotkeys (Fixed - Not Configurable)
+4. **System Tray Menu**:
+   Right-click the Shadow tray icon to:
+   - Toggle Server and test connectivity
+   - Run, edit, and add automation scripts
+   - View and customize global hotkeys
+   - Mute/unmute notifications with automatic queue replay
+   - Restart or quit the assistant
 
-- **Alt+Q**: Show/hide popup window
-- **Alt+X**: Start voice input mode
-- **Alt+C**: Trigger pre-configured n8n webhook
+---
 
-## n8n Integration Details
+## Architecture & Integration
 
-This application is designed to work with n8n self-hosted as the backend. Instead of implementing custom server components (ai_service, context_engine, script_runner, notes_service), the client communicates directly with n8n workflows via HTTP webhooks.
-
-When you press Alt+C, the application sends a POST request to:
-`{N8N_BASE_URL}/webhook/{N8N_WEBHOOK_ID}`
-
-With a JSON payload containing:
-```json
-{
-  "action": "execute_script",
-  "timestamp": <current_timestamp>
-}
+```text
+               ┌────────────────────────────────────────────────────────┐
+               │                     Shadow Client                      │
+               │                                                        │
+┌───────────┐  │  ┌──────────────┐     ┌──────────────┐                 │
+│ User Keys │─┼─►│ HotkeyManager│────►│FloatingPopup │ (Qt UI)         │
+└───────────┘  │  └──────────────┘     └──────┬───────┘                 │
+               │                              │                         │
+               │  ┌──────────────────────┐    │                         │
+               │  │  ContextCollector    │◄───┘                         │
+               │  │ (mss screen capture) │                              │
+               │  └──────────┬───────────┘                              │
+               │             │                                          │
+               │  ┌──────────▼───────────┐     ┌─────────────────────┐  │
+               │  │       ApiClient      │────►│  n8n Webhook / AI   │  │
+               │  │ (httpx connection)   │     │ (Self-hosted flow)  │  │
+               │  └──────────────────────┘     └──────────┬──────────┘  │
+               │                                          │             │
+               │  ┌──────────────────────┐                │ (HTTP POST) │
+               │  │ NotificationListener │◄───────────────┘             │
+               │  │   (HTTPServer)       │                              │
+               │  └──────────┬───────────┘                              │
+               │             ▼                                          │
+               │  ┌──────────────────────┐                              │
+               │  │       TrayApp        │ (System notifications)       │
+               │  └──────────────────────┘                              │
+               └────────────────────────────────────────────────────────┘
 ```
-
-You can configure your n8n workflow to handle this webhook and perform any desired actions.
-
-## Backward Compatibility
-
-The application maintains backward compatibility with the previous server/WebSocket architecture:
-- SERVER_URL and WS_URL configurations are still present but unused by default
-- WebSocket listener code is removed from main.py but can be re-added if needed
-- Existing API client can still communicate with legacy servers if configured

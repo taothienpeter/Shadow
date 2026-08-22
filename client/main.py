@@ -70,6 +70,11 @@ def main():
     # System tray app (replaces inline QSystemTrayIcon setup)
     tray = TrayApp(popup, notification_listener, config)
 
+    # Sync scripts and config path to popup
+    popup.set_scripts(tray.get_current_scripts(), tray._scripts_config_path)
+    tray.scripts_changed.connect(lambda s: popup.set_scripts(s, tray._scripts_config_path))
+    popup.scripts_changed.connect(tray._on_scripts_updated_from_manager)
+
     # Connect tray signals to popup/actions
     tray.toggle_popup_requested.connect(popup.toggle_requested.emit)
     tray.quit_requested.connect(app.quit)
@@ -125,34 +130,60 @@ def main():
     context_collector.context_ready.connect(_on_context_ready)
     context_collector.context_error.connect(_on_context_error)
 
-    # Hotkeys setup with initial mapping from tray (persisted config)
+    # Hotkeys setup with initial mapping from tray (persisted config + scripts)
     def _build_hotkey_map(cfg: dict) -> dict:
         mapping = {}
+        # 1. System hotkeys
         if "hotkey_popup" in cfg and cfg["hotkey_popup"]:
             mapping[cfg["hotkey_popup"]] = popup.toggle_requested.emit
         if "hotkey_voice" in cfg and cfg["hotkey_voice"]:
             mapping[cfg["hotkey_voice"]] = popup.voice_mode_requested.emit
         if "hotkey_context" in cfg and cfg["hotkey_context"]:
             mapping[cfg["hotkey_context"]] = context_collector.capture_and_analyze
+
+        # 2. Script quick-launch hotkeys (e.g. Alt+1, Alt+2, Alt+3, Alt+4, etc.)
+        current_scripts = tray.get_current_scripts()
+        for idx, script in enumerate(current_scripts):
+            hk = TrayApp.get_script_hotkey(script, idx)
+            if hk and hk not in mapping:
+                mapping[hk] = (lambda i=idx: lambda: tray._run_script(i))(idx)
+
         return mapping
 
     initial_hotkeys = _build_hotkey_map(tray.get_current_hotkeys())
     hotkeys = HotkeyManager(initial_hotkeys)
 
-    def _on_hotkeys_changed(new_cfg: dict):
-        new_map = _build_hotkey_map(new_cfg)
+    def _refresh_all_hotkeys():
+        new_map = _build_hotkey_map(tray.get_current_hotkeys())
         hotkeys.update_callbacks(new_map)
 
-    tray.hotkeys_changed.connect(_on_hotkeys_changed)
+    tray.hotkeys_changed.connect(lambda cfg: _refresh_all_hotkeys())
+    tray.scripts_changed.connect(lambda scripts: _refresh_all_hotkeys())
 
     def cleanup():
         """Clean shutdown of all components."""
-        print("Shutting down...")
-        hotkeys.stop()
-        notification_listener.stop()
-        async_runner.stop()
-        # ApiClient cleanup is handled by its __aexit__ or explicit close if needed
-        # For now, rely on the async_runner stopping which will cancel pending tasks
+        print("Shutting down...", flush=True)
+        try:
+            hotkeys.stop()
+        except Exception as e:
+            print(f"Error stopping hotkeys: {e}")
+
+        try:
+            notification_listener.stop()
+        except Exception as e:
+            print(f"Error stopping notification listener: {e}")
+
+        try:
+            # Close HTTP connection pools
+            future = async_runner.run_coro(api_client.close())
+            future.result(timeout=2.0)
+        except Exception:
+            pass
+
+        try:
+            async_runner.stop()
+        except Exception as e:
+            print(f"Error stopping async runner: {e}")
 
     # Connect cleanup to app quit
     app.aboutToQuit.connect(cleanup)

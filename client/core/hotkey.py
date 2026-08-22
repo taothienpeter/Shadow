@@ -70,10 +70,13 @@ class Win32HotkeyManager:
     """Windows native hotkey listener using RegisterHotKey."""
 
     def __init__(self, callbacks: dict[str, Callable]):
+        global _current_manager_instance
+        _current_manager_instance = self
         self._callbacks = callbacks
         self._thread: Optional[threading.Thread] = None
         self._thread_id: Optional[int] = None
         self._running = False
+        self._was_running_before_pause = False
         self._started_evt = threading.Event()
         self._registered_ids = {}
 
@@ -133,12 +136,27 @@ class Win32HotkeyManager:
         self._registered_ids.clear()
 
     def stop(self):
-        if self._running and self._thread_id:
-            self._running = False
+        if self._thread_id:
             user32.PostThreadMessageW(self._thread_id, WM_QUIT, 0, 0)
             if self._thread and self._thread.is_alive():
-                self._thread.join(timeout=1.0)
-            print("Hotkey listener stopped")
+                self._thread.join(timeout=2.0)
+            self._thread_id = None
+        self._running = False
+        print("Hotkey listener stopped")
+
+    def pause(self):
+        """Temporarily stop listener so focused dialogs can record hotkeys without triggering them."""
+        if self._running:
+            self._was_running_before_pause = True
+            self.stop()
+            print("Hotkey listener paused for key recording")
+
+    def resume(self):
+        """Resume listener if it was running before pause."""
+        if self._was_running_before_pause:
+            self._was_running_before_pause = False
+            self.start()
+            print("Hotkey listener resumed")
 
     def update_callbacks(self, new_callbacks: dict[str, Callable]) -> bool:
         """Dynamically update registered hotkeys and restart listener."""
@@ -162,9 +180,12 @@ class PynputHotkeyManager:
     """Fallback hotkey manager using pynput for non-Windows platforms."""
 
     def __init__(self, callbacks: dict[str, Callable]):
+        global _current_manager_instance
+        _current_manager_instance = self
         self._callbacks = callbacks
         self.listener = None
         self.running = False
+        self._was_running_before_pause = False
 
     def start(self) -> bool:
         if not PYNPUT_AVAILABLE:
@@ -189,6 +210,16 @@ class PynputHotkeyManager:
             self.running = False
             print("Hotkey listener stopped")
 
+    def pause(self):
+        if self.running:
+            self._was_running_before_pause = True
+            self.stop()
+
+    def resume(self):
+        if self._was_running_before_pause:
+            self._was_running_before_pause = False
+            self.start()
+
     def update_callbacks(self, new_callbacks: dict[str, Callable]) -> bool:
         """Dynamically update registered hotkeys and restart listener."""
         self.stop()
@@ -197,6 +228,35 @@ class PynputHotkeyManager:
 
     def is_running(self) -> bool:
         return self.running
+
+
+# Global instance and pause/resume helpers
+_current_manager_instance = None
+_pause_depth = 0
+
+
+def get_active_hotkey_manager():
+    global _current_manager_instance
+    return _current_manager_instance
+
+
+def pause_hotkeys():
+    """Suspend global hotkeys (ref-counted) so inputs can record keys cleanly."""
+    global _pause_depth
+    _pause_depth += 1
+    mgr = get_active_hotkey_manager()
+    if mgr and _pause_depth == 1:
+        mgr.pause()
+
+
+def resume_hotkeys():
+    """Resume global hotkeys when recording or dialog finishes."""
+    global _pause_depth
+    if _pause_depth > 0:
+        _pause_depth -= 1
+    mgr = get_active_hotkey_manager()
+    if mgr and _pause_depth == 0:
+        mgr.resume()
 
 
 # Main Export

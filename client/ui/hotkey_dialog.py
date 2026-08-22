@@ -16,6 +16,8 @@ from PyQt6.QtWidgets import (
     QLineEdit, QWidget, QFrame, QMessageBox, QGroupBox
 )
 
+from client.core.hotkey import pause_hotkeys, resume_hotkeys
+
 
 class HotkeyInput(QLineEdit):
     """Custom QLineEdit that records key combinations when focused."""
@@ -46,9 +48,26 @@ class HotkeyInput(QLineEdit):
         self._current_hotkey = hotkey_str.lower().strip()
         self.setText(self._format_display(self._current_hotkey))
 
+    def focusInEvent(self, event):
+        pause_hotkeys()
+        self.setPlaceholderText("Press key combination now...")
+        super().focusInEvent(event)
+
+    def focusOutEvent(self, event):
+        self.setPlaceholderText("Click and press shortcut...")
+        resume_hotkeys()
+        super().focusOutEvent(event)
+
     def keyPressEvent(self, event: QKeyEvent):
         key = event.key()
         modifiers = event.modifiers()
+
+        # Allow clearing shortcut with Backspace or Delete
+        if key in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
+            self.set_hotkey_string("")
+            self.hotkey_recorded.emit("")
+            event.accept()
+            return
 
         # Ignore standalone modifier presses
         if key in (Qt.Key.Key_Control, Qt.Key.Key_Alt, Qt.Key.Key_Shift, Qt.Key.Key_Meta):
@@ -315,3 +334,15 @@ class HotkeySettingsDialog(QDialog):
 
         self.hotkeys_updated.emit(new_config)
         self.accept()
+
+    def showEvent(self, event):
+        pause_hotkeys()
+        super().showEvent(event)
+
+    def closeEvent(self, event):
+        resume_hotkeys()
+        super().closeEvent(event)
+
+    def reject(self):
+        resume_hotkeys()
+        super().reject()

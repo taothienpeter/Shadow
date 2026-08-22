@@ -49,8 +49,6 @@ class ScreenshotCapture:
         if not PIL_AVAILABLE:
             raise ImportError("Pillow is required for image processing. Install with: pip install Pillow")
 
-        self._sct = mss.mss()
-
     def capture_all(self) -> bytes:
         """
         Capture all monitors and return as JPEG bytes.
@@ -61,22 +59,23 @@ class ScreenshotCapture:
         if not MSS_AVAILABLE or not PIL_AVAILABLE:
             raise RuntimeError("Required dependencies not available")
 
-        # Get the monitor to capture
-        if self.monitor_index == 0:
-            # Capture all monitors
-            monitor = self._sct.monitors[0]  # Monitors[0] is the virtual encompassing all monitors
-        else:
-            # Capture specific monitor
-            monitor = self._sct.monitors[self.monitor_index]
+        with mss.mss() as sct:
+            # Get the monitor to capture
+            if self.monitor_index == 0:
+                # Capture all monitors
+                monitor = sct.monitors[0]  # Monitors[0] is the virtual encompassing all monitors
+            else:
+                # Capture specific monitor
+                monitor = sct.monitors[self.monitor_index]
 
-        # Capture the screen
-        screenshot = self._sct.grab(monitor)
+            # Capture the screen
+            screenshot = sct.grab(monitor)
 
-        # Convert to PIL Image
-        img = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
+            # Convert to PIL Image
+            img = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
 
-        # Compress to JPEG
-        return self._compress(img)
+            # Compress to JPEG
+            return self._compress(img)
 
     def capture_active_window(self) -> bytes:
         """
@@ -122,34 +121,35 @@ class ScreenshotCapture:
             raise RuntimeError("Required dependencies not available")
 
         try:
-            # Get virtual screen bounding box to clamp coordinates
-            virtual_mon = self._sct.monitors[0]
-            v_left = virtual_mon["left"]
-            v_top = virtual_mon["top"]
-            v_right = v_left + virtual_mon["width"]
-            v_bottom = v_top + virtual_mon["height"]
+            with mss.mss() as sct:
+                # Get virtual screen bounding box to clamp coordinates
+                virtual_mon = sct.monitors[0]
+                v_left = virtual_mon["left"]
+                v_top = virtual_mon["top"]
+                v_right = v_left + virtual_mon["width"]
+                v_bottom = v_top + virtual_mon["height"]
 
-            clamped_left = max(v_left, min(x, v_right - 1))
-            clamped_top = max(v_top, min(y, v_bottom - 1))
-            clamped_right = max(clamped_left + 1, min(x + width, v_right))
-            clamped_bottom = max(clamped_top + 1, min(y + height, v_bottom))
+                clamped_left = max(v_left, min(x, v_right - 1))
+                clamped_top = max(v_top, min(y, v_bottom - 1))
+                clamped_right = max(clamped_left + 1, min(x + width, v_right))
+                clamped_bottom = max(clamped_top + 1, min(y + height, v_bottom))
 
-            # Define the region to capture
-            monitor = {
-                "top": clamped_top,
-                "left": clamped_left,
-                "width": clamped_right - clamped_left,
-                "height": clamped_bottom - clamped_top,
-            }
+                # Define the region to capture
+                monitor = {
+                    "top": clamped_top,
+                    "left": clamped_left,
+                    "width": clamped_right - clamped_left,
+                    "height": clamped_bottom - clamped_top,
+                }
 
-            # Capture the screen
-            screenshot = self._sct.grab(monitor)
+                # Capture the screen
+                screenshot = sct.grab(monitor)
 
-            # Convert to PIL Image
-            img = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
+                # Convert to PIL Image
+                img = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
 
-            # Compress to JPEG
-            return self._compress(img)
+                # Compress to JPEG
+                return self._compress(img)
         except Exception:
             # Fallback to full screen if region capture fails
             return self.capture_all()

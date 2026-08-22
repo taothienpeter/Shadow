@@ -58,12 +58,26 @@ class AsyncRunner:
 
     def stop(self):
         """
-        Stop the background event loop and wait for thread to finish.
+        Stop the background event loop, cancel tasks, and close loop cleanly.
         Call during application shutdown.
         """
         if not self._started:
             return
 
-        self._loop.call_soon_threadsafe(self._loop.stop)
-        self._thread.join(timeout=5.0)
+        def _cancel_all_tasks():
+            for task in asyncio.all_tasks(self._loop):
+                task.cancel()
+            self._loop.stop()
+
+        if self._loop.is_running():
+            self._loop.call_soon_threadsafe(_cancel_all_tasks)
+
+        self._thread.join(timeout=3.0)
+
+        if not self._loop.is_closed():
+            try:
+                self._loop.close()
+            except Exception:
+                pass
+
         self._started = False

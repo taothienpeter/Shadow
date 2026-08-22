@@ -3,8 +3,11 @@ Context collector module for gathering screenshot, app info, and sending to serv
 """
 import base64
 import threading
+from datetime import datetime, timezone
 from typing import Dict, Optional
+
 from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtWidgets import QApplication
 
 try:
     import psutil
@@ -15,6 +18,8 @@ except ImportError:
 try:
     import win32gui
     import win32process
+    import win32api
+    import win32con
     WIN32GUI_AVAILABLE = True
 except ImportError:
     WIN32GUI_AVAILABLE = False
@@ -49,7 +54,7 @@ class ContextCollector(QObject):
     def capture_and_analyze(self) -> None:
         """
         Main pipeline: capture screenshot, get app info, build payload, call API, emit signal.
-        This method is designed to be called from the pynput hotkey thread.
+        This method is designed to be called from the pynput/Win32 hotkey thread.
         """
         # Notify UI that analysis has started
         self.analysis_started.emit()
@@ -132,6 +137,27 @@ class ContextCollector(QObject):
             "window_title": window_title
         }
 
+    def _get_screen_resolution(self) -> str:
+        """Dynamically detect screen resolution."""
+        if WIN32GUI_AVAILABLE:
+            try:
+                w = win32api.GetSystemMetrics(win32con.SM_CXSCREEN)
+                h = win32api.GetSystemMetrics(win32con.SM_CYSCREEN)
+                if w > 0 and h > 0:
+                    return f"{w}x{h}"
+            except Exception:
+                pass
+
+        try:
+            screen = QApplication.primaryScreen()
+            if screen:
+                geo = screen.geometry()
+                return f"{geo.width()}x{geo.height()}"
+        except Exception:
+            pass
+
+        return "unknown"
+
     def build_context_payload(self, screenshot_b64: str, app_name: str, window_title: str,
                             include_screenshot: bool = True) -> Dict[str, Optional[str]]:
         """
@@ -146,18 +172,7 @@ class ContextCollector(QObject):
         Returns:
             Dictionary ready to be JSON-encoded and sent to the server
         """
-        from datetime import datetime, timezone
-
-        screen_res = "1920x1080"
-        try:
-            if WIN32GUI_AVAILABLE:
-                import win32api
-                import win32con
-                w = win32api.GetSystemMetrics(win32con.SM_CXSCREEN)
-                h = win32api.GetSystemMetrics(win32con.SM_CYSCREEN)
-                screen_res = f"{w}x{h}"
-        except Exception:
-            pass
+        screen_res = self._get_screen_resolution()
 
         payload = {
             "action": "context_analysis",

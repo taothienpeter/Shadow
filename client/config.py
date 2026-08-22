@@ -1,4 +1,16 @@
+import os
+import sys
+from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def get_default_data_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        data_dir = Path(os.getenv("APPDATA", "")) / "AI Desktop Assistant"
+    else:
+        data_dir = Path(__file__).parent / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir
 
 
 class ClientConfig(BaseSettings):
@@ -20,8 +32,10 @@ class ClientConfig(BaseSettings):
     # Shared secret for authenticating incoming notifications from n8n
     n8n_auth_token: str = ""
     # Scripts configuration
-    scripts_config_path: str = "scripts_config.json"
+    scripts_config_path: str = str(get_default_data_dir() / "scripts_config.json")
     # Notification queue configuration
-    notification_queue_path: str = "notification_queue.json"
+    notification_queue_path: str = str(get_default_data_dir() / "notification_queue.json")
+    # Hotkeys configuration
+    hotkeys_config_path: str = str(get_default_data_dir() / "hotkeys_config.json")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

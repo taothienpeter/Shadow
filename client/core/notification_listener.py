@@ -70,6 +70,11 @@ class NotificationHandler(BaseHTTPRequestHandler):
         return  # Disable logging to keep console clean
 
 
+class ReusableHTTPServer(HTTPServer):
+    """HTTPServer with address reuse enabled for quick restarts."""
+    allow_reuse_address = True
+
+
 class NotificationListener(QObject):
     """
     Listens for HTTP POST notifications from n8n on a specified port.
@@ -100,7 +105,7 @@ class NotificationListener(QObject):
         """Thread target that runs the HTTP server with restart logic."""
         while self._running:
             try:
-                self.server = HTTPServer((self.host, self.port), NotificationHandler)
+                self.server = ReusableHTTPServer((self.host, self.port), NotificationHandler)
                 # Provide callback and auth token to handler instances
                 self.server.notification_callback = self._handle_notification
                 self.server.auth_token = self.auth_token
@@ -111,14 +116,12 @@ class NotificationListener(QObject):
                 if self._running:  # Only log if we're still supposed to be running
                     print(f"Notification listener error: {e}. Restarting in 5 seconds...")
                     time.sleep(5)
-                # If we're shutting down, break out of the loop
             finally:
-                # Clean up server reference
-                if hasattr(self, 'server') and self.server:
+                # Clean up socket on exit
+                if self.server:
                     try:
-                        self.server.shutdown()
                         self.server.server_close()
-                    except:
+                    except Exception:
                         pass
                     self.server = None
 
@@ -138,12 +141,12 @@ class NotificationListener(QObject):
             return
 
         self._running = False
-        if hasattr(self, 'server') and self.server:
+        if self.server:
             try:
                 self.server.shutdown()
             except Exception:
                 pass
-        if self.thread:
+        if self.thread and self.thread.is_alive():
             self.thread.join(timeout=2.0)
         print("Notification listener stopped.")
 

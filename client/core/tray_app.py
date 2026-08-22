@@ -16,9 +16,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from PyQt6.QtCore import QObject, pyqtSignal, QTimer, QSettings
+from PyQt6.QtCore import QObject, pyqtSignal, QTimer, QSettings, Qt
 from PyQt6.QtGui import QAction, QIcon, QPixmap, QPainter, QColor, QFont, QBrush
-from client.core.api_client import ApiClient
 from PyQt6.QtWidgets import (
     QApplication,
     QInputDialog,
@@ -26,6 +25,9 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QSystemTrayIcon,
 )
+
+from client.core.api_client import ApiClient
+from client.core.script_runner import run_script
 
 
 class TrayApp(QObject):
@@ -35,6 +37,7 @@ class TrayApp(QObject):
     toggle_popup_requested = pyqtSignal()
     server_toggled = pyqtSignal(bool)
     script_run_requested = pyqtSignal(int)  # script index
+    scripts_changed = pyqtSignal(list)  # list of scripts updated
     notification_toggled = pyqtSignal(bool)  # enabled state
     hotkeys_changed = pyqtSignal(dict)  # new hotkeys config mapping
     quit_requested = pyqtSignal()
@@ -57,6 +60,9 @@ class TrayApp(QObject):
         self._notification_queue_path = app_data_dir / "notification_queue.json"
         self._hotkeys_config_path = app_data_dir / "hotkeys_config.json"
         self._hotkeys = self._load_hotkeys()
+        # Load persisted data first
+        self._load_scripts()
+        self._load_notification_queue()
 
         # UI
         self._tray_icon = QSystemTrayIcon(self._create_icon())
@@ -66,9 +72,6 @@ class TrayApp(QObject):
         # Build menu
         self._build_menu()
 
-        # Load persisted data
-        self._load_scripts()
-        self._load_notification_queue()
         self._update_pending_count()
         self._update_server_status()
 
@@ -201,6 +204,11 @@ class TrayApp(QObject):
         """Return the current active hotkeys mapping."""
         return dict(self._hotkeys)
 
+    @staticmethod
+    def get_script_hotkey(script: dict, index: int = 0) -> str:
+        """Return explicit hotkey for script if configured, else empty string."""
+        return script.get("hotkey", "").strip().lower()
+
     def _build_hotkeys_menu(self, menu: QMenu):
         """Build the hotkeys display submenu."""
         try:
@@ -234,6 +242,26 @@ class TrayApp(QObject):
             c_action = QAction(f"{c_str}  →  Analyze Context", self)
             c_action.setEnabled(False)
             self._hotkeys_menu.addAction(c_action)
+
+            # Display active script shortcuts ONLY if explicitly assigned
+            active_script_hotkeys = [
+                (script, self.get_script_hotkey(script, idx))
+                for idx, script in enumerate(self._scripts)
+                if self.get_script_hotkey(script, idx)
+            ]
+
+            if active_script_hotkeys:
+                self._hotkeys_menu.addSeparator()
+                s_header = QAction("Script Shortcuts", self)
+                s_header.setEnabled(False)
+                self._hotkeys_menu.addAction(s_header)
+
+                for script, hk in active_script_hotkeys:
+                    s_key = format_key(hk)
+                    s_name = script.get("name", "Script")
+                    s_action = QAction(f"{s_key}  →  Run: {s_name}", self)
+                    s_action.setEnabled(False)
+                    self._hotkeys_menu.addAction(s_action)
 
             self._hotkeys_menu.addSeparator()
 
@@ -280,6 +308,10 @@ class TrayApp(QObject):
         except Exception as e:
             print(f"Error building notifications menu: {e}")
 
+    def get_current_scripts(self) -> List[Dict]:
+        """Return a copy of the current configured scripts list."""
+        return list(self._scripts)
+
     def _rebuild_scripts_menu(self):
         """Rebuild the scripts submenu from current script list."""
         try:
@@ -291,32 +323,107 @@ class TrayApp(QObject):
             if not self._scripts:
                 no_scripts = self._scripts_menu.addAction("No scripts configured")
                 no_scripts.setEnabled(False)
-                self._scripts_menu.addSeparator()
             else:
                 for idx, script in enumerate(self._scripts):
-                    # Create submenu for each script
-                    script_menu = self._scripts_menu.addMenu(script.get("name", f"Script {idx+1}"))
+                    script_name = script.get("name", f"Script {idx+1}")
+                    hk = self.get_script_hotkey(script, idx)
+                    if hk:
+                        hk_fmt = " + ".join([p.strip("<>").upper() for p in hk.split("+") if p.strip()])
+                        menu_title = f"{idx+1}. {script_name}  [{hk_fmt}]"
+                    else:
+                        menu_title = f"{idx+1}. {script_name}"
 
-                    run_action = QAction("Run", self)
+                    script_menu = self._scripts_menu.addMenu(menu_title)
+
+                    run_action = QAction("▶ Run", self)
                     run_action.triggered.connect(lambda checked, i=idx: self._run_script(i))
                     script_menu.addAction(run_action)
 
-                    # Edit action (placeholder)
-                    edit_action = QAction("Edit", self)
-                    edit_action.setEnabled(False)  # Not implemented yet
+                    edit_action = QAction("Edit...", self)
+                    edit_action.triggered.connect(lambda checked, i=idx: self._on_edit_script(i))
                     script_menu.addAction(edit_action)
 
-                    # Delete action (placeholder)
                     delete_action = QAction("Delete", self)
-                    delete_action.setEnabled(False)  # Not implemented yet
+                    delete_action.triggered.connect(lambda checked, i=idx: self._on_delete_script(i))
                     script_menu.addAction(delete_action)
 
-            # Add separator and "Add New Script" at the end
+            # Bottom options
             self._scripts_menu.addSeparator()
             add_action = self._scripts_menu.addAction("+ Add New Script...")
             add_action.triggered.connect(self._on_add_script)
+
+            manage_action = self._scripts_menu.addAction("Manage Scripts...")
+            manage_action.triggered.connect(self._on_manage_scripts)
         except Exception as e:
             print(f"Error rebuilding scripts menu: {e}")
+
+    def _on_add_script(self):
+        """Open dialog to add a new script."""
+        try:
+            from client.ui.script_dialog import ScriptEditDialog
+            dlg = ScriptEditDialog(parent=None)
+            if dlg.exec() == 1:
+                new_data = dlg.get_data()
+                self._scripts.append(new_data)
+                self._save_scripts()
+                self._rebuild_scripts_menu()
+                self.scripts_changed.emit(self._scripts)
+                self.show_message("Script Added", f"Added '{new_data['name']}'", 2000)
+        except Exception as e:
+            print(f"Error adding script: {e}")
+            self.show_message("Script Error", f"Failed to add script: {e}", 4000)
+
+    def _on_edit_script(self, index: int):
+        """Open dialog to edit an existing script."""
+        try:
+            if 0 <= index < len(self._scripts):
+                from client.ui.script_dialog import ScriptEditDialog
+                dlg = ScriptEditDialog(script=self._scripts[index], parent=None)
+                if dlg.exec() == 1:
+                    updated_data = dlg.get_data()
+                    self._scripts[index] = updated_data
+                    self._save_scripts()
+                    self._rebuild_scripts_menu()
+                    self.scripts_changed.emit(self._scripts)
+                    self.show_message("Script Updated", f"Updated '{updated_data['name']}'", 2000)
+        except Exception as e:
+            print(f"Error editing script: {e}")
+
+    def _on_delete_script(self, index: int):
+        """Delete a script by index."""
+        try:
+            if 0 <= index < len(self._scripts):
+                name = self._scripts[index].get("name", "this script")
+                reply = QMessageBox.question(
+                    None,
+                    "Delete Script",
+                    f"Are you sure you want to delete '{name}'?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No
+                )
+                if reply == QMessageBox.StandardButton.Yes:
+                    self._scripts.pop(index)
+                    self._save_scripts()
+                    self._rebuild_scripts_menu()
+                    self.scripts_changed.emit(self._scripts)
+                    self.show_message("Script Deleted", f"Deleted '{name}'", 2000)
+        except Exception as e:
+            print(f"Error deleting script: {e}")
+
+    def _on_manage_scripts(self):
+        """Open full Script Manager dialog."""
+        try:
+            from client.ui.script_dialog import ScriptManagerDialog
+            dlg = ScriptManagerDialog(self._scripts_config_path, self._scripts, parent=None)
+            dlg.scripts_updated.connect(self._on_scripts_updated_from_manager)
+            dlg.exec()
+        except Exception as e:
+            print(f"Error opening script manager: {e}")
+
+    def _on_scripts_updated_from_manager(self, new_scripts: list):
+        self._scripts = new_scripts
+        self._rebuild_scripts_menu()
+        self.scripts_changed.emit(self._scripts)
 
     # --------------------------------------------------------------------- #
     # Private: Signal Handlers
@@ -361,9 +468,9 @@ class TrayApp(QObject):
             
             if script_path.exists():
                 if sys.platform == "win32":
-                    subprocess.Popen(f'start cmd /k "python {script_path}"', shell=True)
+                    subprocess.Popen(f'start cmd /k "\"{sys.executable}\" \"{script_path}\""', shell=True)
                 else:
-                    subprocess.Popen(["python", str(script_path)])
+                    subprocess.Popen([sys.executable, str(script_path)])
                 self.show_message("Test Connection", "Running test script in a new terminal window...", 3000)
             else:
                 QMessageBox.warning(None, "File Not Found", f"Cannot find test script at:\n{script_path}")
@@ -387,64 +494,23 @@ class TrayApp(QObject):
             print(f"Error toggling notifications: {e}")
             self.show_message("Notifications Error", f"Failed to toggle notifications: {e}", 5000)
 
-    def _on_add_script(self):
-        """Handle adding a new script via dialog."""
-        try:
-            # Get script name
-            name, ok = QInputDialog.getText(
-                None, "Add New Script", "Enter a name for this script:"
-            )
-            if not ok or not name:
-                return
-
-            # Get script path/command
-            path, _ = QInputDialog.getText(
-                None,
-                "Add New Script",
-                "Enter command or path to executable (e.g., notepad.exe, cmd, /path/to/script):",
-            )
-            if not path:
-                return
-
-            # Optional working directory
-            cwd, ok = QInputDialog.getText(
-                None, "Add New Script", "Working directory (optional):", text=""
-            )
-            if not ok:
-                cwd = ""
-
-            # Add to scripts list
-            new_script = {"name": name.strip(), "command": path.strip(), "cwd": cwd.strip()}
-            self._scripts.append(new_script)
-            self._save_scripts()
-            self._rebuild_scripts_menu()
-        except Exception as e:
-            print(f"Error adding script: {e}")
-            self.show_message("Add Script Error", f"Failed to add script: {e}", 5000)
-
     def _run_script(self, index: int):
         """Run a script by index."""
         try:
             if 0 <= index < len(self._scripts):
                 script = self._scripts[index]
                 self.script_run_requested.emit(index)
-                try:
-                    # Run the command
-                    subprocess.Popen(
-                        script["command"],
-                        cwd=script["cwd"] if script["cwd"] else None,
-                        shell=True,  # Allow shell commands like "dir", "ls"
-                    )
-                    # Show feedback
+                success, msg = run_script(script)
+                if success:
                     self.show_message(
                         "Script Running",
-                        f"Running: {script['name']}",
+                        f"Running: {script.get('name', 'Script')}",
                         msec=2000,
                     )
-                except Exception as e:
+                else:
                     self.show_message(
                         "Script Error",
-                        f"Failed to run '{script['name']}': {str(e)}",
+                        msg,
                         msec=5000,
                     )
             else:
@@ -479,10 +545,25 @@ class TrayApp(QObject):
             print(f"Error queuing notification: {e}")
 
     def _replay_notification_queue(self):
-        """Show all queued notifications when unmuting."""
+        """Show queued notifications when unmuting with overflow summary."""
         try:
-            for item in self._notification_queue:
+            total = len(self._notification_queue)
+            if total == 0:
+                return
+
+            # Show at most 3 notifications to avoid spamming the user
+            items_to_show = self._notification_queue[:3]
+            for item in items_to_show:
                 self._show_notification(item["payload"])
+
+            if total > 3:
+                remaining = total - 3
+                self.show_message(
+                    "Missed Notifications",
+                    f"...plus {remaining} more notification{'s' if remaining != 1 else ''} received while muted.",
+                    4000
+                )
+
             self._notification_queue.clear()
             self._save_queue()
             self._update_pending_count()
@@ -618,7 +699,7 @@ class TrayApp(QObject):
             font = QFont("Segoe UI", 28, QFont.Weight.Bold)
             painter.setFont(font)
             painter.setPen(QColor(255, 255, 255))
-            painter.drawText(pixmap.rect(), 0x0084, "S")  # Qt.AlignmentFlag.AlignCenter
+            painter.drawText(pixmap.rect(), int(Qt.AlignmentFlag.AlignCenter), "S")
             painter.end()
             return QIcon(pixmap)
         except Exception as e:

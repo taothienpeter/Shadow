@@ -14,11 +14,12 @@ block_cipher = None
 base_dir = os.path.abspath(SPECPATH)
 
 # Data files to bundle with the binary
-datas = [
+candidate_datas = [
     (os.path.join(base_dir, 'client', 'ui', 'styles.qss'), 'client/ui'),
     (os.path.join(base_dir, 'client', 'data'), 'client/data'),
     (os.path.join(base_dir, '.env.example'), '.'),
 ]
+datas = [(src, dst) for src, dst in candidate_datas if os.path.exists(src)]
 
 # Hidden imports to guarantee full reflection
 hidden_imports = [

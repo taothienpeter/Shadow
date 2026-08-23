@@ -28,13 +28,12 @@ def main():
     def on_x():
         print("  -> Triggered: Alt+X (Voice Input Mode)")
 
-    def on_c():
-        print("  -> Triggered: Alt+C (Context Analysis)")
+    def on_a():
+        print("  -> Triggered: Alt+A (Context Analysis)")
 
     hotkey_manager = HotkeyManager({
         "<alt>+q": on_q,
-        "<alt>+x": on_x,
-        "<alt>+c": on_c,
+        "<alt>+a": on_a,
     })
 
     if hotkey_manager.start():

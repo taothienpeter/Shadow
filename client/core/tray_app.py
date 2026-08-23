@@ -41,6 +41,7 @@ class TrayApp(QObject):
     notification_toggled = pyqtSignal(bool)  # enabled state
     hotkeys_changed = pyqtSignal(dict)  # new hotkeys config mapping
     capture_requested = pyqtSignal(str)  # "full" | "window" | "snippet"
+    screenshot_settings_changed = pyqtSignal(dict)  # updated screenshot parameters
     quit_requested = pyqtSignal()
 
     def __init__(self, app, config_loader, config):
@@ -60,7 +61,9 @@ class TrayApp(QObject):
         self._scripts_config_path = app_data_dir / "scripts_config.json"
         self._notification_queue_path = app_data_dir / "notification_queue.json"
         self._hotkeys_config_path = app_data_dir / "hotkeys_config.json"
+        self._screenshot_config_path = app_data_dir / "screenshot_config.json"
         self._hotkeys = self._load_hotkeys()
+        self._screenshot_settings = self._load_screenshot_settings()
         # Load persisted data first
         self._load_scripts()
         self._load_notification_queue()
@@ -193,7 +196,7 @@ class TrayApp(QObject):
         """Load hotkeys mapping from json or config defaults."""
         default = {
             "hotkey_popup": getattr(self._config, "hotkey_popup", "<alt>+q"),
-            "hotkey_context": getattr(self._config, "hotkey_context", "<alt>+c"),
+            "hotkey_scripts": getattr(self._config, "hotkey_scripts", "<alt>+a"),
         }
         try:
             if self._hotkeys_config_path.exists():
@@ -232,15 +235,15 @@ class TrayApp(QObject):
                 return " + ".join([p.strip("<>").upper() for p in k.split("+") if p.strip()])
 
             p_str = format_key(self._hotkeys.get("hotkey_popup", "<alt>+q"))
-            c_str = format_key(self._hotkeys.get("hotkey_context", "<alt>+c"))
+            s_str = format_key(self._hotkeys.get("hotkey_scripts", "<alt>+a"))
 
             q_action = QAction(f"{p_str}  →  Toggle Popup", self)
             q_action.setEnabled(False)
             self._hotkeys_menu.addAction(q_action)
 
-            c_action = QAction(f"{c_str}  →  Analyze Context", self)
-            c_action.setEnabled(False)
-            self._hotkeys_menu.addAction(c_action)
+            s_action = QAction(f"{s_str}  →  Scripts Menu", self)
+            s_action.setEnabled(False)
+            self._hotkeys_menu.addAction(s_action)
 
             # Display active script shortcuts ONLY if explicitly assigned
             active_script_hotkeys = [
@@ -288,10 +291,53 @@ class TrayApp(QObject):
         self.hotkeys_changed.emit(new_hotkeys)
         self.show_message("Hotkeys Updated", "New shortcuts applied immediately!", 3000)
 
-    def _build_capture_menu(self, menu: QMenu):
-        """Build the screen capture submenu."""
+    def _load_screenshot_settings(self) -> dict:
+        """Load screen capture settings from JSON file or default."""
+        defaults = {
+            "quality": 70,
+            "max_dimension": 1920,
+            "monitor_index": 0,
+            "recent_apps_limit": 4,
+        }
         try:
-            full_action = QAction("Capture Full Screen (Alt+C)", self)
+            if self._screenshot_config_path.exists():
+                with open(self._screenshot_config_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    defaults.update(data)
+        except Exception as e:
+            print(f"Error loading screenshot settings: {e}")
+        return defaults
+
+    def get_screenshot_settings(self) -> dict:
+        """Return current screenshot settings."""
+        return dict(self._screenshot_settings)
+
+    def _save_screenshot_settings(self, new_settings: dict):
+        """Save settings, emit signal, and notify user."""
+        self._screenshot_settings.update(new_settings)
+        try:
+            self._screenshot_config_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self._screenshot_config_path, "w", encoding="utf-8") as f:
+                json.dump(self._screenshot_settings, f, indent=2)
+        except Exception as e:
+            print(f"Error saving screenshot settings: {e}")
+
+        self.screenshot_settings_changed.emit(self._screenshot_settings)
+        self._rebuild_capture_menu()
+
+    def _rebuild_capture_menu(self):
+        """Rebuild the screen capture menu to update checkmarks."""
+        if hasattr(self, "_capture_menu") and self._capture_menu:
+            self._capture_menu.clear()
+            self._build_capture_menu(self._capture_menu)
+
+    def _build_capture_menu(self, menu: QMenu):
+        """Build the screen capture submenu with quick triggers and live parameter controls."""
+        try:
+            self._capture_menu = menu
+
+            # 1. Quick Capture Triggers
+            full_action = QAction("Capture Full Screen", self)
             full_action.triggered.connect(lambda: self.capture_requested.emit("full"))
             menu.addAction(full_action)
 
@@ -302,8 +348,86 @@ class TrayApp(QObject):
             snip_action = QAction("Interactive Area Snipping", self)
             snip_action.triggered.connect(lambda: self.capture_requested.emit("snippet"))
             menu.addAction(snip_action)
+
+            menu.addSeparator()
+
+            # 2. Quality Presets
+            quality_menu = menu.addMenu("Quality Preset")
+            current_q = int(self._screenshot_settings.get("quality", 70))
+            q_options = [
+                ("High Quality (90%)", 90),
+                ("Balanced (70%)", 70),
+                ("Performance (50%)", 50),
+            ]
+            for label, q_val in q_options:
+                action = QAction(label, self)
+                action.setCheckable(True)
+                action.setChecked(current_q == q_val)
+                action.triggered.connect(lambda checked, q=q_val: self._save_screenshot_settings({"quality": q}))
+                quality_menu.addAction(action)
+
+            # 3. Max Resolution Presets
+            res_menu = menu.addMenu("Max Resolution")
+            current_dim = int(self._screenshot_settings.get("max_dimension", 1920))
+            res_options = [
+                ("1080p Full HD (1920px)", 1920),
+                ("2K QHD (2560px)", 2560),
+                ("4K UHD (3840px)", 3840),
+                ("720p HD (1280px)", 1280),
+                ("Original (No Resize)", 0),
+            ]
+            for label, dim_val in res_options:
+                action = QAction(label, self)
+                action.setCheckable(True)
+                action.setChecked(current_dim == dim_val)
+                action.triggered.connect(lambda checked, d=dim_val: self._save_screenshot_settings({"max_dimension": d}))
+                res_menu.addAction(action)
+
+            # 4. Display Monitor
+            mon_menu = menu.addMenu("Capture Monitor")
+            current_mon = int(self._screenshot_settings.get("monitor_index", 0))
+            all_mon_action = QAction("All Monitors", self)
+            all_mon_action.setCheckable(True)
+            all_mon_action.setChecked(current_mon == 0)
+            all_mon_action.triggered.connect(lambda checked: self._save_screenshot_settings({"monitor_index": 0}))
+            mon_menu.addAction(all_mon_action)
+
+            primary_mon_action = QAction("Primary Monitor Only", self)
+            primary_mon_action.setCheckable(True)
+            primary_mon_action.setChecked(current_mon == 1)
+            primary_mon_action.triggered.connect(lambda checked: self._save_screenshot_settings({"monitor_index": 1}))
+            mon_menu.addAction(primary_mon_action)
+
+            menu.addSeparator()
+
+            # 5. Advanced Settings Dialog
+            config_action = QAction("⚙  Configure Screen Capture...", self)
+            config_action.triggered.connect(self._on_open_screenshot_settings)
+            menu.addAction(config_action)
+
         except Exception as e:
             print(f"Error building capture menu: {e}")
+
+    def _on_open_screenshot_settings(self):
+        """Open the Screenshot Settings modal dialog."""
+        try:
+            from client.ui.screenshot_dialog import ScreenshotSettingsDialog
+            dlg = ScreenshotSettingsDialog(
+                config_path=self._screenshot_config_path,
+                current_settings=self._screenshot_settings,
+                parent=None,
+            )
+            dlg.settings_updated.connect(self._on_screenshot_settings_dialog_updated)
+            dlg.exec()
+        except Exception as e:
+            print(f"Error opening screenshot settings dialog: {e}")
+
+    def _on_screenshot_settings_dialog_updated(self, new_settings: dict):
+        """Callback when user saves settings in the dialog."""
+        self._screenshot_settings = new_settings
+        self.screenshot_settings_changed.emit(new_settings)
+        self._rebuild_capture_menu()
+        self.show_message("Settings Saved", "Screen capture settings applied successfully!", 3000)
 
 
 

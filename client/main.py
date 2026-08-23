@@ -45,6 +45,17 @@ from client.config import ClientConfig
 
 
 def main():
+    # Single instance guard on Windows to prevent hotkey conflicts
+    _mutex = None
+    if sys.platform == "win32":
+        import ctypes
+        ERROR_ALREADY_EXISTS = 183
+        _mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "Local\\ShadowAssistantSingleInstanceMutex")
+        if ctypes.windll.kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+            print("⚠️  Another instance of Shadow Assistant is already running.", flush=True)
+            print("Please close the existing instance from the System Tray or Task Manager before starting a new one.", flush=True)
+            sys.exit(0)
+
     print("Starting AI Desktop Assistant...", flush=True)
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
@@ -105,6 +116,20 @@ def main():
 
     tray.capture_requested.connect(_on_tray_capture_requested)
 
+    # Apply & react to screenshot settings updates
+    def _apply_screenshot_settings(cfg: dict):
+        if "quality" in cfg:
+            screenshot.quality = int(cfg["quality"])
+        if "max_dimension" in cfg:
+            screenshot.max_dimension = int(cfg["max_dimension"])
+        if "monitor_index" in cfg:
+            screenshot.monitor_index = int(cfg["monitor_index"])
+        if "recent_apps_limit" in cfg:
+            context_collector.MAX_RECENT_APPS = int(cfg["recent_apps_limit"])
+
+    _apply_screenshot_settings(tray.get_screenshot_settings())
+    tray.screenshot_settings_changed.connect(_apply_screenshot_settings)
+
     # Show inbound notifications in popup context area and as system tray notification
     def _on_inbound_notification(data):
         display_text = ApiClient.extract_response_text(data)
@@ -152,8 +177,8 @@ def main():
         # 1. System hotkeys
         if "hotkey_popup" in cfg and cfg["hotkey_popup"]:
             mapping[cfg["hotkey_popup"]] = popup.toggle_requested.emit
-        if "hotkey_context" in cfg and cfg["hotkey_context"]:
-            mapping[cfg["hotkey_context"]] = lambda: context_collector.capture_and_analyze(mode="full")
+        if "hotkey_scripts" in cfg and cfg["hotkey_scripts"]:
+            mapping[cfg["hotkey_scripts"]] = popup.open_scripts_menu
 
         # 2. Script quick-launch hotkeys (e.g. Alt+1, Alt+2, Alt+3, Alt+4, etc.)
         current_scripts = tray.get_current_scripts()

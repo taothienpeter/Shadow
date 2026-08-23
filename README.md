@@ -6,7 +6,7 @@ A sleek, macOS / Apple-inspired AI-powered desktop assistant for Windows with sc
 
 - **Floating Conversational Bar**: Apple frosted glass UI that appears smoothly at your cursor (`Alt+Q`)
 - **Global Hotkey Manager**: Fully customizable global keyboard shortcuts with key recording UI
-- **Screen & App Context Awareness**: Instant multi-monitor screenshot capture + active window inspection sent to n8n (`Alt+C`)
+- **Screen & App Context Awareness**: Instant multi-monitor screenshot capture + active window inspection sent to n8n (`Alt+A`)
 - **Script & Automation Manager**: Quick launch cards for applications (`.exe`), Python scripts (`.py`), batch files (`.bat`/`.ps1`), and web URLs (`https://`)
 - **Inbound Notification Listener**: Built-in HTTP server listening on Tailscale/LAN to receive real-time POST notifications from n8n workflows
 - **System Tray Integration**: Background tray menu with server status, hotkey settings, notification muting & queue replay, script launcher, and restart controls
@@ -53,8 +53,7 @@ A sleek, macOS / Apple-inspired AI-powered desktop assistant for Windows with sc
 
 2. **Default Shortcuts**:
    - **`Alt+Q`**: Show / hide the floating assistant bar
-   - **`Alt+X`**: Open in voice mode
-   - **`Alt+C`**: Capture screen + active window context and send to n8n for analysis
+   - **`Alt+A`**: Capture screen + active window context and send to n8n for analysis
 
    *(Hotkeys can be customized via the Tray Menu → Hotkeys → Change Hotkeys...)*
 

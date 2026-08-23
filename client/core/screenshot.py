@@ -33,14 +33,18 @@ class ScreenshotCapture:
     Uses mss for fast multi-monitor capture with fallbacks to PIL ImageGrab and Qt.
     """
 
-    def __init__(self, monitor_index: int = 0):
+    def __init__(self, monitor_index: int = 0, quality: int = 70, max_dimension: int = 1920):
         """
         Initialize the screenshot capture.
 
         Args:
             monitor_index: Monitor to capture (0 = all monitors, 1 = primary, etc.)
+            quality: Default JPEG compression quality (1-100)
+            max_dimension: Max width/height in px before proportional downscaling
         """
         self.monitor_index = monitor_index
+        self.quality = quality
+        self.max_dimension = max_dimension
 
         if not MSS_AVAILABLE and not PIL_AVAILABLE:
             raise ImportError("Pillow or mss is required for screenshot functionality.")
@@ -171,14 +175,19 @@ class ScreenshotCapture:
         # Fallback to full screen if region capture fails
         return self.capture_all()
 
-    def _compress(self, raw_img: Image, quality: int = 70, max_dimension: int = 1920) -> bytes:
+    def _compress(
+        self,
+        raw_img: Image,
+        quality: Optional[int] = None,
+        max_dimension: Optional[int] = None,
+    ) -> bytes:
         """
         Compress a PIL Image to JPEG bytes with specified quality and max dimension.
 
         Args:
             raw_img: PIL Image to compress
-            quality: JPEG quality (1-100)
-            max_dimension: Maximum width/height (resizes proportionally if exceeded)
+            quality: JPEG quality (1-100, defaults to self.quality)
+            max_dimension: Maximum width/height (defaults to self.max_dimension)
 
         Returns:
             JPEG image bytes
@@ -187,12 +196,14 @@ class ScreenshotCapture:
             raise RuntimeError("Pillow is required for image compression")
 
         img = raw_img
+        q = quality if quality is not None else self.quality
+        md = max_dimension if max_dimension is not None else self.max_dimension
 
         # Resize if image exceeds max dimension to optimize network latency & Vision tokens
-        if max_dimension > 0:
+        if md and md > 0:
             w, h = img.size
-            if max(w, h) > max_dimension:
-                scale = max_dimension / max(w, h)
+            if max(w, h) > md:
+                scale = md / max(w, h)
                 new_w = max(1, int(w * scale))
                 new_h = max(1, int(h * scale))
                 img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
@@ -209,5 +220,5 @@ class ScreenshotCapture:
         # Save to bytes
         from io import BytesIO
         img_bytes = BytesIO()
-        img.save(img_bytes, format='JPEG', quality=quality, optimize=True)
+        img.save(img_bytes, format='JPEG', quality=q, optimize=True)
         return img_bytes.getvalue()

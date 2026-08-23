@@ -4,6 +4,7 @@ import os
 import sys
 import time
 import json
+import base64
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional
@@ -14,7 +15,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import (
     Qt, QTimer, QPropertyAnimation, QEasingCurve, QEvent,
-    pyqtSignal, QAbstractAnimation, QRectF, QProcess
+    pyqtSignal, QAbstractAnimation, QRectF, QProcess, QPoint
 )
 from PyQt6.QtGui import (
     QCursor, QPainter, QColor, QPen, QFont, QLinearGradient,
@@ -24,6 +25,7 @@ from PyQt6.QtGui import (
 from client.core.api_client import ApiClient
 from client.core.script_runner import run_script
 from client.ui.snipping_tool import SnippingTool
+from client.ui.translation_popup import TranslationPopup
 
 IS_WINDOWS = sys.platform == "win32"
 
@@ -65,7 +67,7 @@ if IS_WINDOWS:
 # ── Main Widget ─────────────────────────────────────────────────
 
 class FloatingPopup(QDialog):
-    """Ultra-sleek conversational assistant floating bar with multimodal vision support."""
+    """Ultra-sleek conversational assistant floating bar with multimodal vision & note mode."""
 
     # Signals
     toggle_requested = pyqtSignal()
@@ -75,6 +77,7 @@ class FloatingPopup(QDialog):
     response_received = pyqtSignal(dict)
     script_executed = pyqtSignal(dict)
     scripts_changed = pyqtSignal(list)
+    show_translation_requested = pyqtSignal(str, QPoint)
 
     BASE_WIDTH = 560
     BAR_HEIGHT = 96
@@ -98,6 +101,9 @@ class FloatingPopup(QDialog):
         self._anim = None
         self._attached_screenshot: Optional[bytes] = None
         self._snipping_tool: Optional[SnippingTool] = None
+        self._translation_popup: Optional[TranslationPopup] = None
+        self._snipping_intent: str = "chat"  # "chat" | "translate"
+        self._last_snippet_cursor_pos: Optional[QPoint] = None
 
         self._setup_ui()
         self._apply_styles()
@@ -106,6 +112,7 @@ class FloatingPopup(QDialog):
         self.set_context_text_requested.connect(self.set_context_text)
         self.set_input_text_requested.connect(self.set_input_text)
         self.clear_input_requested.connect(self.clear_input)
+        self.show_translation_requested.connect(self._on_show_translation_popup)
 
     # ── Win32 Focus ─────────────────────────────────────────────
 
@@ -182,18 +189,21 @@ class FloatingPopup(QDialog):
 
         ctx_layout.addStretch()
 
-        # Quick action: Summarize (text-only minimal tag)
-        self.summarize_btn = QPushButton("Summarize")
-        self.summarize_btn.setObjectName("actionTag")
-        self.summarize_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.summarize_btn.clicked.connect(lambda: self._on_context_action("summarize"))
-        ctx_layout.addWidget(self.summarize_btn)
+        # Quick action: Translate (Snipping tool + translation popup)
+        self.translate_btn = QPushButton("Translate")
+        self.translate_btn.setObjectName("actionTag")
+        self.translate_btn.setToolTip("Select an area to translate instantly")
+        self.translate_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.translate_btn.clicked.connect(self._on_translate_clicked)
+        ctx_layout.addWidget(self.translate_btn)
 
-        # Quick action: Note (text-only minimal tag)
+        # Quick action: Note (Checkable Toggle button)
         self.note_btn = QPushButton("Note")
-        self.note_btn.setObjectName("actionTag")
+        self.note_btn.setObjectName("noteTag")
+        self.note_btn.setCheckable(True)
+        self.note_btn.setToolTip("Toggle Note Mode (saves text note; only sends image if 📷 is clicked)")
         self.note_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.note_btn.clicked.connect(lambda: self._on_context_action("note"))
+        self.note_btn.toggled.connect(self._on_note_toggled)
         ctx_layout.addWidget(self.note_btn)
 
         # Quick action: Scripts
@@ -248,12 +258,12 @@ class FloatingPopup(QDialog):
         self.input_field.returnPressed.connect(self._on_send)
         input_layout.addWidget(self.input_field)
 
-        # Screenshot / Snipping tool button
+        # Screenshot / Privacy Snipping tool button
         self.screenshot_btn = QPushButton("📷")
         self.screenshot_btn.setObjectName("chatScreenshotBtn")
-        self.screenshot_btn.setToolTip("Capture screen area (Snipping Tool)")
+        self.screenshot_btn.setToolTip("Privacy Snippet: Select specific screen area instead of full screen")
         self.screenshot_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.screenshot_btn.clicked.connect(self._trigger_snipping)
+        self.screenshot_btn.clicked.connect(lambda: self._trigger_snipping(intent="chat"))
         input_layout.addWidget(self.screenshot_btn)
 
         self.send_btn = QPushButton("Send")
@@ -338,7 +348,7 @@ class FloatingPopup(QDialog):
         self.hide()
         self.input_field.clear()
         self._clear_attachment()
-        self.input_field.setPlaceholderText("Ask Shadow or type a message...")
+        self._update_placeholder()
         self.update()
 
     def toggle(self):
@@ -348,11 +358,31 @@ class FloatingPopup(QDialog):
         self._last_toggle_time = now
         self.fade_out() if self.isVisible() else self.show_at_cursor()
 
+    def _update_placeholder(self):
+        if self.note_btn.isChecked():
+            self.input_field.setPlaceholderText("📝 Type a note to save (click 📷 if you want to attach image)...")
+        elif self._attached_screenshot:
+            self.input_field.setPlaceholderText("Ask a question about this screen snippet...")
+        else:
+            self.input_field.setPlaceholderText("Ask Shadow or type a message...")
+
+    def _on_note_toggled(self, checked: bool):
+        self._update_placeholder()
+        if checked:
+            self._set_status("Note Mode Active", "ready")
+        else:
+            self._set_status("Chat Mode", "ready")
+
     # ── Snipping Tool & Screenshot Attachment ──────────────────
 
-    def _trigger_snipping(self):
+    def _on_translate_clicked(self):
+        """Trigger snipping tool for fast translation."""
+        self._trigger_snipping(intent="translate")
+
+    def _trigger_snipping(self, intent: str = "chat"):
         """Open interactive snipping tool to capture a screen region."""
-        # Hide popup temporarily so it doesn't appear in the screenshot
+        self._snipping_intent = intent
+        self._last_snippet_cursor_pos = QCursor.pos()
         self.hide()
 
         if self._snipping_tool is None:
@@ -360,30 +390,73 @@ class FloatingPopup(QDialog):
             self._snipping_tool.snippet_captured.connect(self._on_snippet_captured)
             self._snipping_tool.snippet_cancelled.connect(self._on_snippet_cancelled)
 
-        # Brief delay to allow popup window to completely hide from screen buffer
         QTimer.singleShot(150, self._snipping_tool.start_selection)
 
     def _on_snippet_captured(self, jpeg_bytes: bytes, metadata: dict):
         """Handle cropped region from SnippingTool."""
+        # ── Case 1: Translate Snippet ──
+        if self._snipping_intent == "translate":
+            self._snipping_intent = "chat"
+            self._set_status("Translating snippet...", "working")
+
+            b64 = base64.b64encode(jpeg_bytes).decode("utf-8")
+            payload = {
+                "action": "translate",
+                "screenshot_b64": b64,
+                "capture_mode": "snippet",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "source": "desktop_assistant",
+            }
+
+            if self.api_client and self._async_runner:
+                try:
+                    future = self._async_runner.run_coro(self.api_client.ask_respond(payload, timeout=60.0))
+                    future.add_done_callback(self._on_translate_api_done)
+                except Exception as e:
+                    self._set_status(f"Translate error: {e}", "error")
+            return
+
+        # ── Case 2: Chat Privacy Snippet Attachment ──
         self._attached_screenshot = jpeg_bytes
         dim = metadata.get("dimension", "Region")
-        self.attachment_label.setText(f"📷 Screen snippet attached ({dim})")
+        self.attachment_label.setText(f"📷 Privacy snippet attached ({dim})")
         self.attachment_frame.show()
         self.setFixedHeight(self.ATTACHED_BAR_HEIGHT)
         self.show_at_cursor()
-        self.input_field.setPlaceholderText("Ask a question about this screen snippet...")
+        self._update_placeholder()
         self._set_status(f"Snippet attached ({dim})", "ready")
+
+    def _on_translate_api_done(self, future):
+        """Callback when translation result is received from server."""
+        try:
+            resp = future.result()
+            if resp:
+                text = ApiClient.extract_response_text(resp)
+                self.show_translation_requested.emit(text, self._last_snippet_cursor_pos or QCursor.pos())
+                self._set_status("Translated", "ready")
+            else:
+                self._set_status("No translation returned", "error")
+        except Exception as e:
+            self._set_status(f"Translate failed: {e}", "error")
+
+    def _on_show_translation_popup(self, text: str, pos: QPoint):
+        """Open the floating translation result card near cursor."""
+        if self._translation_popup is None:
+            self._translation_popup = TranslationPopup()
+        self._translation_popup.show_translation(text, pos)
 
     def _on_snippet_cancelled(self):
         """Restore popup if snipping is cancelled."""
-        self.show_at_cursor()
+        if self._snipping_intent == "chat":
+            self.show_at_cursor()
+        self._snipping_intent = "chat"
 
     def _clear_attachment(self):
         """Detach screenshot from chat message."""
         self._attached_screenshot = None
         self.attachment_frame.hide()
         self.setFixedHeight(self.BAR_HEIGHT)
-        self.input_field.setPlaceholderText("Ask Shadow or type a message...")
+        self._update_placeholder()
 
     # ── Actions ─────────────────────────────────────────────────
 
@@ -392,6 +465,14 @@ class FloatingPopup(QDialog):
         self._scripts = list(scripts or [])
         if config_path:
             self._scripts_config_path = config_path
+
+    def open_scripts_menu(self):
+        """Open popup at cursor if hidden, then trigger scripts dropdown menu."""
+        if not self.isVisible():
+            self.show_at_cursor()
+            QTimer.singleShot(120, self._show_scripts_menu)
+        else:
+            self._show_scripts_menu()
 
     def _show_scripts_menu(self):
         """Open quick scripts menu from the Scripts button."""
@@ -493,71 +574,40 @@ class FloatingPopup(QDialog):
     def _on_send(self):
         text = self.input_field.text().strip()
 
-        # ── Case 1: Sending message with attached screenshot snippet ──
-        if self._attached_screenshot is not None:
-            prompt = text or "Please analyze this screen snippet."
-            self.input_field.clear()
-            self._set_status("Analyzing snippet with AI...", "working")
-
-            if self.context_collector:
-                self.context_collector.capture_and_analyze(
-                    mode="snippet",
-                    user_prompt=prompt,
-                    pre_captured_bytes=self._attached_screenshot,
-                )
-            elif self.api_client and self._async_runner:
-                import base64
-                b64 = base64.b64encode(self._attached_screenshot).decode("utf-8")
-                payload = {
-                    "action": "context_analysis",
-                    "capture_mode": "snippet",
-                    "user_prompt": prompt,
-                    "screenshot_b64": b64,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "source": "desktop_assistant"
-                }
-                try:
-                    future = self._async_runner.run_coro(self.api_client.ask_respond(payload))
-                    future.add_done_callback(self._on_api_done)
-                except Exception as e:
-                    self._set_status(f"Error: {e}", "error")
-
-            self._clear_attachment()
-            return
-
-        # ── Case 2: Regular text commands & chat ──
-        if not text:
-            return
-        self.input_field.clear()
-
-        # Quick restart command
+        # ── Quick Slash / Special Commands ──
         if text.lower() in ("/restart", "/r", "restart"):
+            self.input_field.clear()
             self._set_status("Restarting...", "working")
             QTimer.singleShot(150, lambda: (QProcess.startDetached(sys.executable, sys.argv), QApplication.quit()))
             return
 
-        # Quick snipping command: /snip, /crop, /shot
         if text.lower() in ("/snip", "/crop", "/shot", "/screenshot"):
-            self._trigger_snipping()
+            self.input_field.clear()
+            self._trigger_snipping(intent="chat")
             return
 
-        # Quick script menu trigger: /s, /scripts, /script, /run, /open
+        if text.lower() in ("/translate", "/trans", "/dich"):
+            self.input_field.clear()
+            self._trigger_snipping(intent="translate")
+            return
+
         if text.lower() in ("/s", "/scripts", "/script", "/run", "/open"):
+            self.input_field.clear()
             self._show_scripts_menu()
             return
 
-        # Direct numeric index execution (e.g. typing "1", "2", "/1", "/2")
         cleaned_num = text.lstrip("/")
         if cleaned_num.isdigit():
             idx = int(cleaned_num) - 1
             if 0 <= idx < len(self._scripts):
+                self.input_field.clear()
                 self._run_script_by_data(self._scripts[idx])
                 return
 
-        # Script prefix execution: /s <name>, /run <name>, /open <name>, /script <name>
         script_prefixes = ("/s ", "/script ", "/scripts ", "/run ", "/open ")
         for pfx in script_prefixes:
             if text.lower().startswith(pfx):
+                self.input_field.clear()
                 query = text[len(pfx):].strip().lower()
                 matched = [s for s in self._scripts if query in s.get("name", "").lower() or query in s.get("command", "").lower()]
                 if matched:
@@ -566,22 +616,92 @@ class FloatingPopup(QDialog):
                     self._set_status(f"No script matched '{query}'", "error")
                 return
 
-        # Direct exact match with existing script name
         direct_match = [s for s in self._scripts if s.get("name", "").strip().lower() == text.lower()]
         if direct_match:
+            self.input_field.clear()
             self._run_script_by_data(direct_match[0])
             return
 
+        # ── Branch 1: NOTE MODE (Checkable Tag Active) ──
+        if self.note_btn.isChecked():
+            if not text and self._attached_screenshot is None:
+                return
+            self.input_field.clear()
+            self._set_status("Saving note...", "working")
+
+            # Note only attaches image if user intentionally pressed 📷
+            shot_b64 = base64.b64encode(self._attached_screenshot).decode("utf-8") if self._attached_screenshot is not None else None
+            app_info = self.context_collector.get_active_app_info() if self.context_collector else {}
+
+            payload = {
+                "action": "note",
+                "content": text or "Note snippet",
+                "message": text or "Note snippet",
+                "screenshot_b64": shot_b64,
+                "active_app": app_info.get("app_name", "unknown"),
+                "window_title": app_info.get("window_title", "unknown"),
+                "recent_apps": app_info.get("recent_apps", []),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "source": "desktop_assistant",
+            }
+
+            if self.api_client and self._async_runner:
+                try:
+                    future = self._async_runner.run_coro(self.api_client.ask_respond(payload, timeout=60.0))
+                    future.add_done_callback(self._on_api_done)
+                except Exception as e:
+                    self._set_status(f"Note error: {e}", "error")
+
+            self._clear_attachment()
+            return
+
+        # ── Branch 2: CHAT MODE (Screen-Aware Default & Privacy Snippet) ──
+        if not text and self._attached_screenshot is None:
+            return
+        self.input_field.clear()
         self._set_status("Thinking...", "working")
+
+        # Determine screenshot data
+        if self._attached_screenshot is not None:
+            # User explicitly selected a privacy region via 📷 button
+            shot_b64 = base64.b64encode(self._attached_screenshot).decode("utf-8")
+            mode = "snippet"
+        else:
+            # Default: automatically capture full screen
+            try:
+                full_bytes = self.context_collector._screenshot.capture_all() if self.context_collector else None
+                shot_b64 = base64.b64encode(full_bytes).decode("utf-8") if full_bytes else None
+            except Exception:
+                shot_b64 = None
+            mode = "full"
+
+        app_info = self.context_collector.get_active_app_info() if self.context_collector else {}
+        screen_res = self.context_collector._get_screen_resolution() if self.context_collector else "1920x1080"
+
+        payload = {
+            "action": "chat",
+            "message": text,
+            "user_prompt": text,
+            "capture_mode": mode,
+            "screenshot_b64": shot_b64,
+            "active_app": app_info.get("app_name", "unknown"),
+            "window_title": app_info.get("window_title", "unknown"),
+            "recent_apps": app_info.get("recent_apps", []),
+            "screen_resolution": screen_res,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "source": "desktop_assistant",
+        }
 
         if self.api_client and self._async_runner:
             try:
-                future = self._async_runner.run_coro(self.api_client.send_message(text))
+                future = self._async_runner.run_coro(self.api_client.ask_respond(payload, timeout=60.0))
                 future.add_done_callback(self._on_api_done)
             except Exception as e:
                 self._set_status(f"Error: {e}", "error")
         else:
             self._set_status("Ready", "ready")
+
+        self._clear_attachment()
 
     def _on_context_action(self, action):
         ctx = self._current_context or self.context_label.text()

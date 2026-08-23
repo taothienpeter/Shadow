@@ -17,7 +17,7 @@ class ClientConfig(BaseSettings):
     screenshot_quality: int = 70
     theme: str = "dark"  # "dark" | "light"
     hotkey_popup: str = "<alt>+q"
-    hotkey_context: str = "<alt>+c"
+    hotkey_scripts: str = "<alt>+a"
     # Notification listener settings
     notification_port: int = 8080
     tailscale_ip: str = "0.0.0.0"  # Bind address for listener (set to Tailscale IP in .env)

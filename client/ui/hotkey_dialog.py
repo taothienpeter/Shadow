@@ -115,7 +115,7 @@ class HotkeySettingsDialog(QDialog):
 
     DEFAULT_HOTKEYS = {
         "hotkey_popup": "<alt>+q",
-        "hotkey_context": "<alt>+c"
+        "hotkey_scripts": "<alt>+a"
     }
 
     def __init__(self, config_path: Path, current_hotkeys: dict = None, parent=None):
@@ -161,11 +161,11 @@ class HotkeySettingsDialog(QDialog):
             self._current_hotkeys.get("hotkey_popup", "<alt>+q")
         )
 
-        # 2. Context Analysis
-        self.context_input = self._create_row(
+        # 2. Open Scripts Menu
+        self.scripts_input = self._create_row(
             form_layout,
-            "Analyze Screen Context",
-            self._current_hotkeys.get("hotkey_context", "<alt>+c")
+            "Open Scripts Menu",
+            self._current_hotkeys.get("hotkey_scripts", "<alt>+a")
         )
 
         root.addWidget(form_frame)
@@ -188,7 +188,7 @@ class HotkeySettingsDialog(QDialog):
         self.cancel_btn.clicked.connect(self.reject)
         btn_row.addWidget(self.cancel_btn)
 
-        self.save_btn = QPushButton("Save & Apply")
+        self.save_btn = QPushButton("Save Hotkeys")
         self.save_btn.setObjectName("saveBtn")
         self.save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.save_btn.clicked.connect(self._on_save)
@@ -292,14 +292,14 @@ class HotkeySettingsDialog(QDialog):
 
     def _on_reset_defaults(self):
         self.popup_input.set_hotkey_string(self.DEFAULT_HOTKEYS["hotkey_popup"])
-        self.context_input.set_hotkey_string(self.DEFAULT_HOTKEYS["hotkey_context"])
+        self.scripts_input.set_hotkey_string(self.DEFAULT_HOTKEYS["hotkey_scripts"])
 
     def _on_save(self):
         p = self.popup_input.get_hotkey_string()
-        c = self.context_input.get_hotkey_string()
+        s = self.scripts_input.get_hotkey_string()
 
         # Validation: check for duplicates
-        keys = [k for k in (p, c) if k]
+        keys = [k for k in (p, s) if k]
         if len(keys) != len(set(keys)):
             QMessageBox.warning(
                 self,
@@ -310,7 +310,7 @@ class HotkeySettingsDialog(QDialog):
 
         new_config = {
             "hotkey_popup": p or self.DEFAULT_HOTKEYS["hotkey_popup"],
-            "hotkey_context": c or self.DEFAULT_HOTKEYS["hotkey_context"],
+            "hotkey_scripts": s or self.DEFAULT_HOTKEYS["hotkey_scripts"],
         }
 
         # Save to JSON

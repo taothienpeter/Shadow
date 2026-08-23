@@ -57,6 +57,29 @@ QPushButton#pinTag:checked {
     border: 1px solid rgba(10, 132, 255, 0.35);
 }
 
+QPushButton#noteTag {
+    background: rgba(255, 255, 255, 0.06);
+    color: #8E8E93;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 2px 8px;
+    font-size: 10px;
+    font-weight: 500;
+}
+
+QPushButton#noteTag:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #F5F5F7;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+QPushButton#noteTag:checked {
+    background: rgba(255, 159, 10, 0.22);
+    color: #FF9F0A;
+    border: 1px solid rgba(255, 159, 10, 0.45);
+    font-weight: 600;
+}
+
 /* ─── Chat Input Capsule ─────────────────────────────────────── */
 
 QFrame#chatInputFrame {

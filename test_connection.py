@@ -121,9 +121,8 @@ async def test_webhook_api():
     try:
         # Test connection with a simple POST request to the webhook endpoint
         test_data = {
-            "message": "Hello from test script!",
+            "action": "test",
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "test": True
         }
 
         response = await api_client.ask_respond(test_data)

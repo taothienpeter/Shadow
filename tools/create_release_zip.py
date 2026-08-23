@@ -32,10 +32,14 @@ if env_example.exists():
 if ZIP_PATH.exists():
     ZIP_PATH.unlink()
 
-print(f"📦 Compressing {DIST_SHADOW} into {ZIP_PATH} ...")
+print(f"📦 Compressing {DIST_SHADOW} into {ZIP_PATH} (excluding private .env) ...")
 with zipfile.ZipFile(ZIP_PATH, "w", zipfile.ZIP_DEFLATED) as zf:
     for root, dirs, files in os.walk(DIST_SHADOW):
         for file in files:
+            # STRICT PRIVACY: Never bundle real .env secrets into public release zip
+            if file == ".env":
+                continue
+
             file_path = Path(root) / file
             # Store inside 'Shadow/' root folder
             arcname = Path("Shadow") / file_path.relative_to(DIST_SHADOW)

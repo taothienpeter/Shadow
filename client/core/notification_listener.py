@@ -3,6 +3,7 @@ Notification listener module for receiving HTTP POST notifications from n8n via 
 """
 import json
 import time
+import threading
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
@@ -100,6 +101,7 @@ class NotificationListener(QObject):
         self.server: HTTPServer | None = None
         self.thread: Thread | None = None
         self._running = False
+        self._stop_event = threading.Event()
 
     def _server_thread(self):
         """Thread target that runs the HTTP server with restart logic."""
@@ -115,7 +117,7 @@ class NotificationListener(QObject):
             except Exception as e:
                 if self._running:  # Only log if we're still supposed to be running
                     print(f"Notification listener error: {e}. Restarting in 5 seconds...")
-                    time.sleep(5)
+                    self._stop_event.wait(5.0)
             finally:
                 # Clean up socket on exit
                 if self.server:
@@ -131,6 +133,7 @@ class NotificationListener(QObject):
             return
 
         self._running = True
+        self._stop_event.clear()
         self.thread = Thread(target=self._server_thread, daemon=True)
         self.thread.start()
         print(f"Notification listener start process initiated on {self.host}:{self.port}")
@@ -141,6 +144,7 @@ class NotificationListener(QObject):
             return
 
         self._running = False
+        self._stop_event.set()
         if self.server:
             try:
                 self.server.shutdown()

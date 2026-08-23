@@ -178,7 +178,7 @@ def main():
         if "hotkey_popup" in cfg and cfg["hotkey_popup"]:
             mapping[cfg["hotkey_popup"]] = popup.toggle_requested.emit
         if "hotkey_scripts" in cfg and cfg["hotkey_scripts"]:
-            mapping[cfg["hotkey_scripts"]] = popup.open_scripts_menu
+            mapping[cfg["hotkey_scripts"]] = popup.open_scripts_menu_requested.emit
 
         # 2. Script quick-launch hotkeys (e.g. Alt+1, Alt+2, Alt+3, Alt+4, etc.)
         current_scripts = tray.get_current_scripts()

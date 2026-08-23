@@ -128,6 +128,14 @@ class TrayApp(QObject):
             # Separator
             menu.addSeparator()
 
+            # Start with Windows (Autostart Toggle)
+            from client.core.autostart import is_autostart_enabled
+            self._autostart_action = QAction("Start with Windows", self)
+            self._autostart_action.setCheckable(True)
+            self._autostart_action.setChecked(is_autostart_enabled())
+            self._autostart_action.triggered.connect(self._on_autostart_toggled)
+            menu.addAction(self._autostart_action)
+
             # Show/Hide Popup
             show_hide_action = QAction("Show/Hide Popup", self)
             show_hide_action.triggered.connect(self._emit_toggle_popup)
@@ -144,6 +152,17 @@ class TrayApp(QObject):
             menu.addAction(quit_action)
         except Exception as e:
             print(f"Error building tray menu: {e}")
+
+    def _on_autostart_toggled(self, checked: bool):
+        """Toggle Windows startup registry entry."""
+        from client.core.autostart import set_autostart
+        success = set_autostart(checked)
+        if success:
+            state_str = "enabled" if checked else "disabled"
+            self.show_message("Startup Settings", f"Auto-start with Windows {state_str}.", 3000)
+        else:
+            self._autostart_action.setChecked(not checked)
+            self.show_message("Startup Settings", "Failed to update startup configuration.", 4000)
 
     def _restart_app(self):
         """Restart the assistant application."""
@@ -604,9 +623,11 @@ class TrayApp(QObject):
     def _on_test_connection(self):
         """Test connection by running the test_connection.py script in a new terminal."""
         try:
-            # Resolve path to the root directory where test_connection.py is located
-            root_dir = Path(__file__).parent.parent.parent
-            script_path = root_dir / "test_connection.py"
+            # Resolve path to test_connection.py in tools/ or root
+            root_dir = Path(__file__).resolve().parents[2]
+            script_path = root_dir / "tools" / "test_connection.py"
+            if not script_path.exists():
+                script_path = root_dir / "test_connection.py"
             
             if script_path.exists():
                 if sys.platform == "win32":

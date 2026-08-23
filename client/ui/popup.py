@@ -78,6 +78,7 @@ class FloatingPopup(QDialog):
     script_executed = pyqtSignal(dict)
     scripts_changed = pyqtSignal(list)
     show_translation_requested = pyqtSignal(str, QPoint)
+    open_scripts_menu_requested = pyqtSignal()
 
     BASE_WIDTH = 560
     BAR_HEIGHT = 96
@@ -109,6 +110,7 @@ class FloatingPopup(QDialog):
         self._apply_styles()
 
         self.toggle_requested.connect(self.toggle)
+        self.open_scripts_menu_requested.connect(self.open_scripts_menu)
         self.set_context_text_requested.connect(self.set_context_text)
         self.set_input_text_requested.connect(self.set_input_text)
         self.clear_input_requested.connect(self.clear_input)

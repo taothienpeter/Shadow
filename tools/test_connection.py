@@ -14,6 +14,7 @@ import socket
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone
+from pathlib import Path
 
 if sys.platform == "win32":
     try:
@@ -22,8 +23,9 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-# Add the client directory to the path so we can import modules
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'client'))
+# Add project root to sys.path
+ROOT_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT_DIR))
 
 from client.core.api_client import ApiClient
 from client.core.notification_listener import NotificationListener
@@ -57,7 +59,6 @@ def print_diagnostics(config):
     """Print diagnostic information for troubleshooting."""
     print("🔍 Connection Diagnostics")
     print("=" * 60)
-
     print("📋 Configuration:")
     print(f"  Tailscale IP from .env: {config.tailscale_ip}")
     print(f"  Notification Port: {config.notification_port}")
@@ -74,7 +75,6 @@ def print_diagnostics(config):
 
     # Determine what IP to listen on and what n8n should use
     listen_host = config.tailscale_ip if config.tailscale_ip != "0.0.0.0" else "0.0.0.0"
-    # For display purposes, show what we're actually binding to
     bind_display = config.tailscale_ip if config.tailscale_ip != "0.0.0.0" else "0.0.0.0 (all interfaces)"
 
     print(f"🎯 Listener Configuration:")
@@ -89,7 +89,6 @@ def test_port_availability(host, port):
     try:
         test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         test_socket.settimeout(2)
-        # Use localhost for testing if binding to all interfaces
         test_host = host if host != "0.0.0.0" else "127.0.0.1"
         result = test_socket.connect_ex((test_host, port))
         test_socket.close()
@@ -101,25 +100,22 @@ def test_port_availability(host, port):
             return True
     except Exception as e:
         print(f"  ℹ️  Port check skipped: {e}")
-        return True  # Assume OK if we can't test
+        return True
 
 
 async def test_webhook_api():
     """Test connection to the webhook API (Client -> n8n)."""
     print("- Testing Webhook API (Client -> n8n)")
 
-    # Load configuration
     config = ClientConfig()
     print(f"  Testing connection to webhook: {config.n8n_webhook_url}")
 
-    # Create API client
     api_client = ApiClient(
         webhook_url=config.n8n_webhook_url,
         api_key=config.n8n_api_key,
     )
 
     try:
-        # Test connection with a simple POST request to the webhook endpoint
         test_data = {
             "action": "test",
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -135,7 +131,6 @@ async def test_webhook_api():
             return False
 
     finally:
-        # Clean up
         await api_client.close()
 
 
@@ -167,7 +162,6 @@ def test_notification_health(host, port):
 class NotificationTester(QObject):
     """Helper class to test notification reception using Qt signals."""
 
-    # Define a signal to match NotificationListener's signal
     notification_received = pyqtSignal(dict)
 
     def __init__(self):
@@ -177,7 +171,6 @@ class NotificationTester(QObject):
         self.notification_received.connect(self._on_notification)
 
     def _on_notification(self, payload):
-        """Callback for when a notification is received."""
         self.received = True
         self.payload = payload
         print(f"\n[{datetime.now().strftime('%H:%M:%S')}] ✅ Notification received!")
@@ -189,41 +182,33 @@ def test_notification_listener(listen_host, port, auth_token, timeout_seconds=30
     print(f"\n- Testing Notification Listener (Listening for {timeout_seconds}s)")
     print(f"  Listening on http://{listen_host}:{port}/notification")
 
-    # Create QApplication if needed (required for Qt signals)
     app = QApplication.instance()
     if app is None:
         app = QApplication([])
 
-    # Create notification tester
     tester = NotificationTester()
 
-    # Create notification listener
     listener = NotificationListener(
         host=listen_host,
         port=port,
         auth_token=auth_token if auth_token and auth_token != "" else None
     )
 
-    # Connect the listener's signal to our tester
     listener.notification_received.connect(tester._on_notification)
 
     try:
-        # Start the listener
         listener.start()
         print(f"  🚀 Notification listener started on {listen_host}:{port}")
 
-        # Wait for notification with timeout
         start_time = time.time()
         while not tester.received and (time.time() - start_time) < timeout_seconds:
-            time.sleep(0.5)  # Sleep to reduce CPU usage
+            time.sleep(0.5)
             remaining = int(timeout_seconds - (time.time() - start_time))
-            if remaining % 10 == 0 and remaining > 0:  # Show countdown every 10 seconds
+            if remaining % 10 == 0 and remaining > 0:
                 print(f"  ⏰ Still waiting... {remaining} seconds remaining")
 
-        # Stop the listener
         listener.stop()
 
-        # Report results
         if tester.received:
             print(f"  [OK] Notification received from n8n!")
             print(f"     Received at: {datetime.fromtimestamp(time.time()).strftime('%H:%M:%S')}")
@@ -246,7 +231,6 @@ def print_troubleshooting_tips(config):
     print(f"      -> From n8n host: ping {config.tailscale_ip}")
     print("   3. Verify no firewall is blocking port 8080 between n8n and this machine")
     print("   4. Test connectivity from n8n using curl:")
-    listen_host = config.tailscale_ip if config.tailscale_ip != "0.0.0.0" else "127.0.0.1"
     display_host = config.tailscale_ip if config.tailscale_ip != "0.0.0.0" else "<your-tailscale-ip>"
     print(f"      -> From n8n host: curl -X POST http://{display_host}:{config.notification_port}/notification -H \"Content-Type: application/json\" -d '{{\"test\":\"connectivity\"}}'")
     print("   5. Check that n8n workflow is configured to use the correct URL:")
@@ -260,28 +244,22 @@ async def main():
     print("🚀 AI Desktop Assistant Connectivity Test")
     print("=" * 60)
 
-    # Load configuration for diagnostics
     config = ClientConfig()
     print_diagnostics(config)
 
-    # Test port availability
     listen_host = config.tailscale_ip if config.tailscale_ip != "0.0.0.0" else "0.0.0.0"
     port_available = test_port_availability(listen_host, config.notification_port)
     if not port_available:
         print("\n⚠️  Warning: Port may be in use. Continuing anyway...")
 
-    # Run tests
     print("\n📋 Running Connectivity Tests:")
     print("-" * 40)
 
-    # Test 1: Webhook API (Client -> n8n)
     webhook_ok = await test_webhook_api()
 
-    # Test 2: Notification Listener Health Check
     host_for_health = config.tailscale_ip if config.tailscale_ip != "0.0.0.0" else "127.0.0.1"
     health_ok = test_notification_health(host_for_health, config.notification_port)
 
-    # Test 3: Actual Notification Listener (only if health check passes)
     notification_ok = False
     notification_payload = None
     if health_ok:
@@ -290,14 +268,13 @@ async def main():
             listen_host=listen_host,
             port=config.notification_port,
             auth_token=auth_token,
-            timeout_seconds=30  # Give user time to trigger from n8n
+            timeout_seconds=30
         )
         notification_ok = success
         notification_payload = payload
     else:
         print("\n- Skipping Notification Listener Test (health check failed)")
 
-    # Summary
     print("\n" + "=" * 60)
     print("📊 Test Results:")
     print(f"  Webhook API (Client → n8n):    {'PASS' if webhook_ok else 'FAIL'}")
@@ -318,7 +295,6 @@ async def main():
 
 
 if __name__ == "__main__":
-    # Run the async test
     success = False
     try:
         success = asyncio.run(main())

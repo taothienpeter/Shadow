@@ -6,6 +6,7 @@ import time
 import json
 from pathlib import Path
 from datetime import datetime, timezone
+from typing import Optional
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -22,6 +23,7 @@ from PyQt6.QtGui import (
 
 from client.core.api_client import ApiClient
 from client.core.script_runner import run_script
+from client.ui.snipping_tool import SnippingTool
 
 IS_WINDOWS = sys.platform == "win32"
 
@@ -63,7 +65,7 @@ if IS_WINDOWS:
 # ── Main Widget ─────────────────────────────────────────────────
 
 class FloatingPopup(QDialog):
-    """Ultra-sleek conversational assistant floating bar."""
+    """Ultra-sleek conversational assistant floating bar with multimodal vision support."""
 
     # Signals
     toggle_requested = pyqtSignal()
@@ -76,12 +78,14 @@ class FloatingPopup(QDialog):
 
     BASE_WIDTH = 560
     BAR_HEIGHT = 96
+    ATTACHED_BAR_HEIGHT = 126
     BORDER_RADIUS = 18
 
-    def __init__(self, parent=None, api_client=None, async_runner=None):
+    def __init__(self, parent=None, api_client=None, async_runner=None, context_collector=None):
         super().__init__(parent)
         self.api_client = api_client
         self._async_runner = async_runner
+        self.context_collector = context_collector
         self._pinned = False
         self._drag_pos = None
         self._last_toggle_time = 0
@@ -92,6 +96,8 @@ class FloatingPopup(QDialog):
         self._scripts: list = []
         self._scripts_config_path = None
         self._anim = None
+        self._attached_screenshot: Optional[bytes] = None
+        self._snipping_tool: Optional[SnippingTool] = None
 
         self._setup_ui()
         self._apply_styles()
@@ -146,7 +152,7 @@ class FloatingPopup(QDialog):
     # ── Layout ──────────────────────────────────────────────────
 
     def _setup_ui(self):
-        """Build compact conversational bar: Top Context Tags -> Bottom Chat Input Capsule."""
+        """Build compact conversational bar: Top Context Tags -> Attachment Badge -> Bottom Chat Input Capsule."""
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint |
             Qt.WindowType.WindowStaysOnTopHint |
@@ -156,8 +162,8 @@ class FloatingPopup(QDialog):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
         self.root_layout = QVBoxLayout(self)
-        self.root_layout.setContentsMargins(16, 12, 16, 12)
-        self.root_layout.setSpacing(6)
+        self.root_layout.setContentsMargins(16, 10, 16, 10)
+        self.root_layout.setSpacing(5)
 
         # ── 1. Context Tag Row ──
         self.context_bar = QWidget()
@@ -206,7 +212,30 @@ class FloatingPopup(QDialog):
 
         self.root_layout.addWidget(self.context_bar)
 
-        # ── 2. Bottom Chat Input Capsule ──
+        # ── 2. Attachment Preview Badge Row (Hidden by default) ──
+        self.attachment_frame = QFrame()
+        self.attachment_frame.setObjectName("attachmentFrame")
+        att_layout = QHBoxLayout(self.attachment_frame)
+        att_layout.setContentsMargins(8, 2, 8, 2)
+        att_layout.setSpacing(6)
+
+        self.attachment_label = QLabel("📷 Screen snippet attached")
+        self.attachment_label.setObjectName("attachmentLabel")
+        att_layout.addWidget(self.attachment_label)
+
+        att_layout.addStretch()
+
+        self.attachment_remove_btn = QPushButton("✕")
+        self.attachment_remove_btn.setObjectName("attachmentRemoveBtn")
+        self.attachment_remove_btn.setToolTip("Remove attached screenshot")
+        self.attachment_remove_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.attachment_remove_btn.clicked.connect(self._clear_attachment)
+        att_layout.addWidget(self.attachment_remove_btn)
+
+        self.attachment_frame.hide()
+        self.root_layout.addWidget(self.attachment_frame)
+
+        # ── 3. Bottom Chat Input Capsule ──
         self.input_frame = QFrame()
         self.input_frame.setObjectName("chatInputFrame")
         input_layout = QHBoxLayout(self.input_frame)
@@ -218,6 +247,14 @@ class FloatingPopup(QDialog):
         self.input_field.setPlaceholderText("Ask Shadow or type a message...")
         self.input_field.returnPressed.connect(self._on_send)
         input_layout.addWidget(self.input_field)
+
+        # Screenshot / Snipping tool button
+        self.screenshot_btn = QPushButton("📷")
+        self.screenshot_btn.setObjectName("chatScreenshotBtn")
+        self.screenshot_btn.setToolTip("Capture screen area (Snipping Tool)")
+        self.screenshot_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.screenshot_btn.clicked.connect(self._trigger_snipping)
+        input_layout.addWidget(self.screenshot_btn)
 
         self.send_btn = QPushButton("Send")
         self.send_btn.setObjectName("chatSendBtn")
@@ -252,7 +289,7 @@ class FloatingPopup(QDialog):
 
         pos = QCursor.pos()
         width = self.BASE_WIDTH
-        height = self.BAR_HEIGHT
+        height = self.height()
 
         x = pos.x() - width // 2
         y = pos.y() - height // 2 - 20
@@ -300,6 +337,7 @@ class FloatingPopup(QDialog):
     def _on_fade_out_done(self):
         self.hide()
         self.input_field.clear()
+        self._clear_attachment()
         self.input_field.setPlaceholderText("Ask Shadow or type a message...")
         self.update()
 
@@ -309,6 +347,43 @@ class FloatingPopup(QDialog):
             return
         self._last_toggle_time = now
         self.fade_out() if self.isVisible() else self.show_at_cursor()
+
+    # ── Snipping Tool & Screenshot Attachment ──────────────────
+
+    def _trigger_snipping(self):
+        """Open interactive snipping tool to capture a screen region."""
+        # Hide popup temporarily so it doesn't appear in the screenshot
+        self.hide()
+
+        if self._snipping_tool is None:
+            self._snipping_tool = SnippingTool(parent=None)
+            self._snipping_tool.snippet_captured.connect(self._on_snippet_captured)
+            self._snipping_tool.snippet_cancelled.connect(self._on_snippet_cancelled)
+
+        # Brief delay to allow popup window to completely hide from screen buffer
+        QTimer.singleShot(150, self._snipping_tool.start_selection)
+
+    def _on_snippet_captured(self, jpeg_bytes: bytes, metadata: dict):
+        """Handle cropped region from SnippingTool."""
+        self._attached_screenshot = jpeg_bytes
+        dim = metadata.get("dimension", "Region")
+        self.attachment_label.setText(f"📷 Screen snippet attached ({dim})")
+        self.attachment_frame.show()
+        self.setFixedHeight(self.ATTACHED_BAR_HEIGHT)
+        self.show_at_cursor()
+        self.input_field.setPlaceholderText("Ask a question about this screen snippet...")
+        self._set_status(f"Snippet attached ({dim})", "ready")
+
+    def _on_snippet_cancelled(self):
+        """Restore popup if snipping is cancelled."""
+        self.show_at_cursor()
+
+    def _clear_attachment(self):
+        """Detach screenshot from chat message."""
+        self._attached_screenshot = None
+        self.attachment_frame.hide()
+        self.setFixedHeight(self.BAR_HEIGHT)
+        self.input_field.setPlaceholderText("Ask Shadow or type a message...")
 
     # ── Actions ─────────────────────────────────────────────────
 
@@ -369,7 +444,6 @@ class FloatingPopup(QDialog):
         manage_action = menu.addAction("⚙  Manage Scripts...")
         manage_action.triggered.connect(self._open_script_manager)
 
-        # Popup directly under the scripts button
         btn_pos = self.scripts_btn.mapToGlobal(self.scripts_btn.rect().bottomLeft())
         menu.exec(btn_pos)
 
@@ -418,6 +492,40 @@ class FloatingPopup(QDialog):
 
     def _on_send(self):
         text = self.input_field.text().strip()
+
+        # ── Case 1: Sending message with attached screenshot snippet ──
+        if self._attached_screenshot is not None:
+            prompt = text or "Please analyze this screen snippet."
+            self.input_field.clear()
+            self._set_status("Analyzing snippet with AI...", "working")
+
+            if self.context_collector:
+                self.context_collector.capture_and_analyze(
+                    mode="snippet",
+                    user_prompt=prompt,
+                    pre_captured_bytes=self._attached_screenshot,
+                )
+            elif self.api_client and self._async_runner:
+                import base64
+                b64 = base64.b64encode(self._attached_screenshot).decode("utf-8")
+                payload = {
+                    "action": "context_analysis",
+                    "capture_mode": "snippet",
+                    "user_prompt": prompt,
+                    "screenshot_b64": b64,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "source": "desktop_assistant"
+                }
+                try:
+                    future = self._async_runner.run_coro(self.api_client.ask_respond(payload))
+                    future.add_done_callback(self._on_api_done)
+                except Exception as e:
+                    self._set_status(f"Error: {e}", "error")
+
+            self._clear_attachment()
+            return
+
+        # ── Case 2: Regular text commands & chat ──
         if not text:
             return
         self.input_field.clear()
@@ -426,6 +534,11 @@ class FloatingPopup(QDialog):
         if text.lower() in ("/restart", "/r", "restart"):
             self._set_status("Restarting...", "working")
             QTimer.singleShot(150, lambda: (QProcess.startDetached(sys.executable, sys.argv), QApplication.quit()))
+            return
+
+        # Quick snipping command: /snip, /crop, /shot
+        if text.lower() in ("/snip", "/crop", "/shot", "/screenshot"):
+            self._trigger_snipping()
             return
 
         # Quick script menu trigger: /s, /scripts, /script, /run, /open
@@ -453,7 +566,7 @@ class FloatingPopup(QDialog):
                     self._set_status(f"No script matched '{query}'", "error")
                 return
 
-        # Direct exact match with existing script name (e.g. typing "n8n", "Task Manager")
+        # Direct exact match with existing script name
         direct_match = [s for s in self._scripts if s.get("name", "").strip().lower() == text.lower()]
         if direct_match:
             self._run_script_by_data(direct_match[0])

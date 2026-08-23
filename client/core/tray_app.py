@@ -40,6 +40,7 @@ class TrayApp(QObject):
     scripts_changed = pyqtSignal(list)  # list of scripts updated
     notification_toggled = pyqtSignal(bool)  # enabled state
     hotkeys_changed = pyqtSignal(dict)  # new hotkeys config mapping
+    capture_requested = pyqtSignal(str)  # "full" | "window" | "snippet"
     quit_requested = pyqtSignal()
 
     def __init__(self, app, config_loader, config):
@@ -108,6 +109,10 @@ class TrayApp(QObject):
             # Scripts Submenu
             scripts_menu = menu.addMenu("Scripts")
             self._build_scripts_menu(scripts_menu)
+
+            # Screen Capture Submenu
+            capture_menu = menu.addMenu("Screen Capture")
+            self._build_capture_menu(capture_menu)
 
             # Hotkeys Submenu
             hotkeys_menu = menu.addMenu("Hotkeys")
@@ -282,6 +287,23 @@ class TrayApp(QObject):
         self._rebuild_hotkeys_menu()
         self.hotkeys_changed.emit(new_hotkeys)
         self.show_message("Hotkeys Updated", "New shortcuts applied immediately!", 3000)
+
+    def _build_capture_menu(self, menu: QMenu):
+        """Build the screen capture submenu."""
+        try:
+            full_action = QAction("Capture Full Screen (Alt+C)", self)
+            full_action.triggered.connect(lambda: self.capture_requested.emit("full"))
+            menu.addAction(full_action)
+
+            window_action = QAction("Capture Active Window", self)
+            window_action.triggered.connect(lambda: self.capture_requested.emit("window"))
+            menu.addAction(window_action)
+
+            snip_action = QAction("Interactive Area Snipping", self)
+            snip_action.triggered.connect(lambda: self.capture_requested.emit("snippet"))
+            menu.addAction(snip_action)
+        except Exception as e:
+            print(f"Error building capture menu: {e}")
 
 
 

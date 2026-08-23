@@ -95,3 +95,51 @@ QPushButton#chatSendBtn {
 QPushButton#chatSendBtn:pressed {
     background: #0056CC;
 }
+
+QPushButton#chatScreenshotBtn {
+    background: rgba(255, 255, 255, 0.06);
+    color: #A1A1A6;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 5px 9px;
+    font-size: 13px;
+    min-height: 20px;
+}
+
+QPushButton#chatScreenshotBtn:hover {
+    background: rgba(255, 255, 255, 0.14);
+    color: #0A84FF;
+    border: 1px solid rgba(10, 132, 255, 0.40);
+}
+
+QPushButton#chatScreenshotBtn:pressed {
+    background: rgba(10, 132, 255, 0.25);
+}
+
+/* ─── Attachment Preview Badge ───────────────────────────────── */
+
+QFrame#attachmentFrame {
+    background: rgba(10, 132, 255, 0.12);
+    border: 1px solid rgba(10, 132, 255, 0.30);
+    border-radius: 8px;
+    padding: 2px 8px;
+}
+
+QLabel#attachmentLabel {
+    color: #0A84FF;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+QPushButton#attachmentRemoveBtn {
+    background: transparent;
+    color: #8E8E93;
+    border: none;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 0px 4px;
+}
+
+QPushButton#attachmentRemoveBtn:hover {
+    color: #FF453A;
+}

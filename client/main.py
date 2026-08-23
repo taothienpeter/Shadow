@@ -5,7 +5,7 @@ Main entrypoint for the AI Desktop Assistant.
 Orchestrates all components:
 - Qt application and system tray
 - API client for server communication
-- Floating popup UI (search/compose, context display)
+- Floating popup UI (search/compose, context display, snipping tool)
 - Screenshot capture
 - Context collection (screenshot + app info → API)
 - Notification listener (inbound HTTP from n8n via Tailscale)
@@ -60,8 +60,20 @@ def main():
         api_key=config.n8n_api_key,
     )
 
-    # UI components
-    popup = FloatingPopup(api_client=api_client, async_runner=async_runner)
+    # Input layer
+    screenshot = ScreenshotCapture()
+    context_collector = ContextCollector(
+        screenshot=screenshot,
+        api_client=api_client,
+        async_runner=async_runner,
+    )
+
+    # UI components (with context collector attached for multimodal vision chat)
+    popup = FloatingPopup(
+        api_client=api_client,
+        async_runner=async_runner,
+        context_collector=context_collector,
+    )
 
     # Notification listener (for inbound notifications from n8n via Tailscale)
     notification_listener = NotificationListener(
@@ -82,13 +94,16 @@ def main():
     tray.toggle_popup_requested.connect(popup.toggle_requested.emit)
     tray.quit_requested.connect(app.quit)
 
-    # Input layer
-    screenshot = ScreenshotCapture()
-    context_collector = ContextCollector(
-        screenshot=screenshot,
-        api_client=api_client,
-        async_runner=async_runner,
-    )
+    # Handle screen capture requested from tray
+    def _on_tray_capture_requested(mode: str):
+        if mode == "snippet":
+            popup._trigger_snipping()
+        elif mode == "window":
+            context_collector.capture_and_analyze(mode="window")
+        else:
+            context_collector.capture_and_analyze(mode="full")
+
+    tray.capture_requested.connect(_on_tray_capture_requested)
 
     # Show inbound notifications in popup context area and as system tray notification
     def _on_inbound_notification(data):
@@ -138,7 +153,7 @@ def main():
         if "hotkey_popup" in cfg and cfg["hotkey_popup"]:
             mapping[cfg["hotkey_popup"]] = popup.toggle_requested.emit
         if "hotkey_context" in cfg and cfg["hotkey_context"]:
-            mapping[cfg["hotkey_context"]] = context_collector.capture_and_analyze
+            mapping[cfg["hotkey_context"]] = lambda: context_collector.capture_and_analyze(mode="full")
 
         # 2. Script quick-launch hotkeys (e.g. Alt+1, Alt+2, Alt+3, Alt+4, etc.)
         current_scripts = tray.get_current_scripts()

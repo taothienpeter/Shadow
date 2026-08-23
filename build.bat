@@ -4,6 +4,9 @@ echo   Shadow Assistant - Build Standalone Windows App
 echo ===================================================
 echo.
 
+REM Stop any running instance of Shadow.exe to prevent file locking
+taskkill /F /IM Shadow.exe >nul 2>&1
+
 REM Check if PyInstaller is installed
 python -m PyInstaller --version >nul 2>&1
 if %errorlevel% neq 0 (

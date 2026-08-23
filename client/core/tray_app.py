@@ -621,25 +621,55 @@ class TrayApp(QObject):
             self.show_message("Server Error", f"Failed to toggle server: {e}", 5000)
 
     def _on_test_connection(self):
-        """Test connection by running the test_connection.py script in a new terminal."""
-        try:
-            # Resolve path to test_connection.py in tools/ or root
-            root_dir = Path(__file__).resolve().parents[2]
-            script_path = root_dir / "tools" / "test_connection.py"
-            if not script_path.exists():
-                script_path = root_dir / "test_connection.py"
-            
-            if script_path.exists():
-                if sys.platform == "win32":
-                    subprocess.Popen(f'start cmd /k "\"{sys.executable}\" \"{script_path}\""', shell=True)
-                else:
-                    subprocess.Popen([sys.executable, str(script_path)])
-                self.show_message("Test Connection", "Running test script in a new terminal window...", 3000)
+        """Test connection directly within the app (works seamlessly in both .exe and source mode)."""
+        import threading
+        self.show_message("Testing Connection", "Checking Webhook and Notification Listener...", 3000)
+
+        def _run_test():
+            from datetime import datetime, timezone
+            import httpx
+
+            webhook_ok = False
+            error_msg = None
+            webhook_url = self._config.n8n_webhook_url
+            listener_ip = self._config.tailscale_ip
+            listener_port = self._config.notification_port
+
+            # 1. Test Outbound Webhook
+            if not webhook_url:
+                self.show_message("Connection Test ❌", "N8N_WEBHOOK_URL is not configured in .env", 5000)
+                return
+
+            try:
+                headers = {"Content-Type": "application/json"}
+                if self._config.n8n_api_key:
+                    headers["Authorization"] = f"Bearer {self._config.n8n_api_key}"
+                payload = {
+                    "action": "test",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+                with httpx.Client(timeout=10.0) as client:
+                    resp = client.post(webhook_url, json=payload, headers=headers)
+                    if resp.status_code == 200:
+                        webhook_ok = True
+                    else:
+                        error_msg = f"HTTP {resp.status_code}"
+            except Exception as e:
+                error_msg = str(e)
+
+            # 2. Check Listener Status
+            listener_active = self._notification_listener and self._notification_listener.is_running()
+            listener_status = f"Active ({listener_ip}:{listener_port})" if listener_active else "Stopped"
+
+            # 3. Show Result
+            if webhook_ok:
+                msg = f"✓ Webhook: 200 OK (ack)\n✓ Listener: {listener_status}"
+                self.show_message("Connection Test Passed ✅", msg, 5000)
             else:
-                QMessageBox.warning(None, "File Not Found", f"Cannot find test script at:\n{script_path}")
-        except Exception as e:
-            print(f"Error testing connection: {e}")
-            self.show_message("Connection Test Error", f"Failed to start test: {e}", 5000)
+                msg = f"✗ Webhook failed: {error_msg}\n• Listener: {listener_status}"
+                self.show_message("Connection Test Failed ❌", msg, 6000)
+
+        threading.Thread(target=_run_test, daemon=True).start()
 
     def _on_notifications_toggled(self, checked: bool):
         try:

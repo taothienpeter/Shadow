@@ -28,15 +28,37 @@
 |    Vị trí: %APPDATA%\AI Desktop Assistant\                        |
 |    (C:\Users\<Username>\AppData\Roaming\AI Desktop Assistant\)    |
 |                                                                   |
-|    ├── .env                     (Webhook URL, Port, API Key)      |
 |    ├── scripts_config.json      (Danh sách scripts tự động hóa)   |
 |    ├── hotkeys_config.json      (Phím tắt cá nhân hóa)            |
 |    ├── screenshot_config.json   (Thông số chụp màn hình, chất lượng)|
-|    └── notification_queue.json  (Hàng đợi thông báo khi mute)     |
+|    ├── notification_queue.json  (Hàng đợi thông báo khi mute)     |
+|    └── .env                     (Cấu hình Webhook URL, Port, IP)  |
 +-------------------------------------------------------------------+
 ```
 
+### 1.1. Chi Tiết Các File Dữ Liệu Runtime
+Trong quá trình bạn khởi động máy tính và chạy file `Shadow.exe`, toàn bộ dữ liệu cấu hình được lưu tự động tại thư mục:
+
+> 📂 **`%APPDATA%\AI Desktop Assistant\`**  
+> *(Đường dẫn thực tế: `C:\Users\<Tên_User>\AppData\Roaming\AI Desktop Assistant\`)*
+
+| Tên File | Vai trò lưu trữ trong Runtime |
+| :--- | :--- |
+| **`scripts_config.json`** | Lưu danh sách kịch bản tự động hóa và phím tắt nhanh (`Alt+1..N`). |
+| **`hotkeys_config.json`** | Lưu phím tắt toàn cục đã đăng ký (`<alt>+q`, `<alt>+a`...). |
+| **`screenshot_config.json`** | Lưu cài đặt chụp ảnh màn hình (chất lượng nén JPEG, độ phân giải tối đa). |
+| **`notification_queue.json`** | Hàng đợi lưu các thông báo nhận từ n8n khi bạn bật chế độ Mute. |
+| **`.env`** | *(Tùy chọn)* Lưu thông số kết nối Webhook URL & IP Tailscale cá nhân. |
+
+💡 **Cách mở nhanh thư mục dữ liệu trên Windows:**
+Bấm tổ hợp phím **`Win + R`** $\rightarrow$ Nhập `%APPDATA%\AI Desktop Assistant` $\rightarrow$ Nhấn **Enter**.
+
 ---
+
+### 1.2. Lợi Ích Của Kiến Trúc Lưu Trữ Này
+1. **Bảo toàn dữ liệu khi cập nhật (`sys.frozen`)**: Khi bạn tải phiên bản `Shadow.exe` mới và giải nén đè lên, toàn bộ scripts và settings cũ trong `%APPDATA%` vẫn giữ nguyên 100%.
+2. **Không lỗi phân quyền (No Permission Denied)**: Windows luôn cho phép ghi dữ liệu tự do vào `%APPDATA%` mà không cần quyền Administrator.
+3. **Sao lưu 1-Click**: Công cụ `tools/backup_settings.bat` sẽ tự động tìm vào thư mục này để nén thành file backup `.zip`.
 
 ## 2. Hướng Dẫn Đóng Gói Ứng Dụng (.exe)
 

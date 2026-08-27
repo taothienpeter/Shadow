@@ -36,8 +36,11 @@ def run_script(script: Dict[str, str]) -> Tuple[bool, str]:
     if cwd and not Path(cwd).exists():
         cwd = None
 
+    if not cwd:
+        cwd = os.path.expanduser("~")
+
     try:
-        # Check if command is a web URL
+        # 1. Check if command is a web URL
         if cmd.startswith("http://") or cmd.startswith("https://"):
             if sys.platform == "win32":
                 try:
@@ -51,13 +54,50 @@ def run_script(script: Dict[str, str]) -> Tuple[bool, str]:
                     webbrowser.open(cmd)
             return True, f"Opened URL: {cmd}"
 
-        # Otherwise execute as local process / shell command
+        # 2. Local executable / file / script
         if sys.platform == "win32":
-            subprocess.Popen(
-                cmd,
-                cwd=cwd,
-                shell=True,
-            )
+            clean_cmd = cmd.strip('"').strip("'")
+            cmd_path = Path(clean_cmd)
+            if not cmd_path.is_absolute() and cwd:
+                rel_path = Path(cwd) / clean_cmd
+                if rel_path.exists():
+                    cmd_path = rel_path
+
+            if cmd_path.exists():
+                ext = cmd_path.suffix.lower()
+                if ext == ".ps1":
+                    subprocess.Popen(
+                        ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", str(cmd_path)],
+                        cwd=cwd,
+                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                    )
+                elif ext in (".py", ".pyw"):
+                    python_exe = sys.executable
+                    subprocess.Popen(
+                        [python_exe, str(cmd_path)],
+                        cwd=cwd,
+                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                    )
+                else:
+                    # .exe, .lnk, documents, etc.
+                    try:
+                        os.startfile(str(cmd_path))
+                    except Exception:
+                        subprocess.Popen(
+                            f'"{cmd_path}"',
+                            cwd=cwd,
+                            shell=True,
+                        )
+            else:
+                # Try os.startfile for system commands (e.g. taskmgr.exe, notepad, calc) or fallback to shell
+                try:
+                    os.startfile(cmd)
+                except Exception:
+                    subprocess.Popen(
+                        cmd,
+                        cwd=cwd,
+                        shell=True,
+                    )
         else:
             subprocess.Popen(
                 cmd,

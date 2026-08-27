@@ -15,15 +15,23 @@ def get_default_data_dir() -> Path:
 
     # If running packaged (.exe) and files don't exist in APPDATA yet, copy defaults
     if getattr(sys, "frozen", False):
-        bundle_data = Path(sys._MEIPASS if hasattr(sys, "_MEIPASS") else sys.executable).parent / "client" / "data"
-        if bundle_data.exists():
-            for f in bundle_data.glob("*.json"):
-                target = data_dir / f.name
-                if not target.exists():
-                    try:
-                        shutil.copy2(f, target)
-                    except Exception:
-                        pass
+        base_bundle = Path(sys._MEIPASS) if hasattr(sys, "_MEIPASS") else Path(sys.executable).parent
+        candidates = [
+            base_bundle / "client" / "data",
+            base_bundle / "_internal" / "client" / "data",
+            Path(sys.executable).parent / "client" / "data",
+            Path(sys.executable).parent / "_internal" / "client" / "data",
+        ]
+        for bundle_data in candidates:
+            if bundle_data.exists():
+                for f in bundle_data.glob("*.json"):
+                    target = data_dir / f.name
+                    if not target.exists():
+                        try:
+                            shutil.copy2(f, target)
+                        except Exception:
+                            pass
+                break
 
     return data_dir
 

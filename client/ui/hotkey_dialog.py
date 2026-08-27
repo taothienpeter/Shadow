@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QLineEdit, QWidget, QFrame, QMessageBox, QGroupBox
 )
 
-from client.core.hotkey import pause_hotkeys, resume_hotkeys
+from client.core.hotkey import pause_hotkeys, resume_hotkeys, reset_hotkey_pause
 
 
 class HotkeyInput(QLineEdit):
@@ -49,13 +49,11 @@ class HotkeyInput(QLineEdit):
         self.setText(self._format_display(self._current_hotkey))
 
     def focusInEvent(self, event):
-        pause_hotkeys()
         self.setPlaceholderText("Press key combination now...")
         super().focusInEvent(event)
 
     def focusOutEvent(self, event):
         self.setPlaceholderText("Click and press shortcut...")
-        resume_hotkeys()
         super().focusOutEvent(event)
 
     def keyPressEvent(self, event: QKeyEvent):
@@ -329,9 +327,13 @@ class HotkeySettingsDialog(QDialog):
         super().showEvent(event)
 
     def closeEvent(self, event):
-        resume_hotkeys()
+        reset_hotkey_pause()
         super().closeEvent(event)
 
+    def accept(self):
+        reset_hotkey_pause()
+        super().accept()
+
     def reject(self):
-        resume_hotkeys()
+        reset_hotkey_pause()
         super().reject()

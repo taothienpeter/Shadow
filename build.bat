@@ -23,7 +23,7 @@ python -m PyInstaller --noconfirm --clean shadow.spec
 if %errorlevel% neq 0 (
     echo.
     echo [ERROR] Build failed! Please check the error output above.
-    pause
+    if "%1" neq "--no-pause" pause
     exit /b %errorlevel%
 )
 
@@ -35,4 +35,4 @@ echo Output executable location:
 echo   dist\Shadow\Shadow.exe
 echo ===================================================
 echo.
-pause
+if "%1" neq "--no-pause" pause

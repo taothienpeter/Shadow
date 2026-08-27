@@ -23,10 +23,10 @@ if IS_WINDOWS:
 class TranslationPopup(QDialog):
     """Minimalist floating translation HUD that tracks mouse cursor."""
 
-    MAX_WIDTH = 440
+    MAX_WIDTH = 540
     MIN_WIDTH = 260
-    MAX_HEIGHT = 280
-    MIN_HEIGHT = 70
+    MAX_HEIGHT = 440
+    MIN_HEIGHT = 65
     BORDER_RADIUS = 12
 
     def __init__(self, parent=None):
@@ -35,57 +35,65 @@ class TranslationPopup(QDialog):
         self._last_text = ""
         self._copied_feedback = False
 
-        # Frameless, on-top, tool window
+        # Frameless, on-top window
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
-            | Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         self._setup_ui()
         self._apply_styles()
         self._setup_shortcuts()
 
-        # Timer to track mouse cursor in real-time
+        # Timer to track mouse cursor and listen for shortcuts via GetAsyncKeyState
+        self._last_cursor_pos = QPoint(-1, -1)
         self._tracking_timer = QTimer(self)
-        self._tracking_timer.setInterval(20)  # 50 fps smooth tracking
-        self._tracking_timer.timeout.connect(self._follow_cursor)
+        self._tracking_timer.setInterval(20)  # 50 fps smooth tracking & instant shortcut response
+        self._tracking_timer.timeout.connect(self._on_tick)
 
     def _setup_ui(self):
         self.root_layout = QVBoxLayout(self)
         self.root_layout.setContentsMargins(14, 12, 14, 12)
-        self.root_layout.setSpacing(4)
+        self.root_layout.setSpacing(6)
 
         # ── Translated Text Display (Pure Content Only) ──
         self.content_edit = QTextEdit()
         self.content_edit.setObjectName("transContent")
         self.content_edit.setReadOnly(True)
-        self.content_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.content_edit.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.content_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.content_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.content_edit.setFont(QFont("Segoe UI", 11))
         self.content_edit.installEventFilter(self)
         self.root_layout.addWidget(self.content_edit)
 
-        # Subtle bottom hint: "Ctrl+C copy & close • Ctrl+X / Esc close"
-        self.hint_lbl = QLabel("Ctrl+C copy & close • Ctrl+X / Esc close")
+        # Subtle bottom hint
+        self.hint_lbl = QLabel("Ctrl+C / Enter / Click to copy • Esc to close")
         self.hint_lbl.setObjectName("transHint")
         self.hint_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.root_layout.addWidget(self.hint_lbl)
 
+        self.installEventFilter(self)
+
     def _setup_shortcuts(self):
         """Setup application-wide shortcuts on the dialog."""
         self.shortcut_copy = QShortcut(QKeySequence("Ctrl+C"), self)
-        self.shortcut_copy.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.shortcut_copy.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self.shortcut_copy.activated.connect(self._copy_and_close)
 
         self.shortcut_close = QShortcut(QKeySequence("Ctrl+X"), self)
-        self.shortcut_close.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.shortcut_close.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self.shortcut_close.activated.connect(self.fade_out)
 
         self.shortcut_esc = QShortcut(QKeySequence("Escape"), self)
-        self.shortcut_esc.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.shortcut_esc.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self.shortcut_esc.activated.connect(self.fade_out)
+
+        self.shortcut_enter = QShortcut(QKeySequence("Return"), self)
+        self.shortcut_enter.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.shortcut_enter.activated.connect(self._copy_and_close)
 
     def _apply_styles(self):
         self.setStyleSheet("""
@@ -103,44 +111,138 @@ class TranslationPopup(QDialog):
                 selection-background-color: rgba(10, 132, 255, 0.50);
             }
             QLabel#transHint {
-                color: rgba(255, 255, 255, 0.35);
+                color: rgba(255, 255, 255, 0.38);
                 font-size: 9px;
                 font-weight: 500;
                 padding-top: 2px;
             }
+            QScrollBar:vertical {
+                background: transparent;
+                width: 5px;
+                margin: 2px 0px 2px 0px;
+            }
+            QScrollBar::handle:vertical {
+                background: rgba(255, 255, 255, 0.25);
+                min-height: 18px;
+                border-radius: 2px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: rgba(255, 255, 255, 0.45);
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                background: transparent;
+            }
         """)
+
+    def _force_focus(self):
+        """Force window into foreground to ensure keyboard shortcuts function immediately."""
+        self.raise_()
+        self.activateWindow()
+        self.content_edit.setFocus()
+
+        if not IS_WINDOWS:
+            return
+
+        try:
+            hwnd = int(self.winId())
+            user32 = ctypes.windll.user32
+            kernel32 = ctypes.windll.kernel32
+
+            cur_fg = user32.GetForegroundWindow()
+            if cur_fg != hwnd:
+                cur_thread = user32.GetWindowThreadProcessId(cur_fg, None)
+                our_thread = kernel32.GetCurrentThreadId()
+
+                if cur_thread != our_thread:
+                    user32.AttachThreadInput(cur_thread, our_thread, True)
+                    user32.SetForegroundWindow(hwnd)
+                    user32.SetActiveWindow(hwnd)
+                    user32.SetFocus(hwnd)
+                    user32.AttachThreadInput(cur_thread, our_thread, False)
+                else:
+                    user32.SetForegroundWindow(hwnd)
+                    user32.SetActiveWindow(hwnd)
+        except Exception:
+            pass
 
     def show_translation(self, text: str, pos: QPoint = None):
         """Display translated text and start tracking mouse cursor."""
         self._last_text = text.strip()
         self.content_edit.setPlainText(self._last_text)
         self._copied_feedback = False
-        self.hint_lbl.setText("Ctrl+C copy & close • Ctrl+X / Esc close")
-        self.hint_lbl.setStyleSheet("color: rgba(255, 255, 255, 0.35);")
+        self.hint_lbl.setText("Ctrl+C / Enter / Click to copy • Esc to close")
+        self.hint_lbl.setStyleSheet("color: rgba(255, 255, 255, 0.38);")
 
-        # Dynamic size calculation based on text volume
-        lines = self._last_text.count("\n") + 1
+        # Dynamic size calculation based on actual wrapped text layout
         char_len = len(self._last_text)
+        if char_len < 40:
+            target_w = max(self.MIN_WIDTH, int(char_len * 9.5 + 80))
+        elif char_len < 120:
+            target_w = 340
+        elif char_len < 300:
+            target_w = 420
+        elif char_len < 600:
+            target_w = 480
+        else:
+            target_w = self.MAX_WIDTH
 
-        w = min(self.MAX_WIDTH, max(self.MIN_WIDTH, int(char_len * 6.0 + 70)))
-        h = min(self.MAX_HEIGHT, max(self.MIN_HEIGHT, lines * 22 + 65))
-        self.setFixedSize(w, h)
+        content_margin_w = 32  # left + right margins + frame padding
+        text_w = target_w - content_margin_w
+        doc = self.content_edit.document()
+        doc.setTextWidth(text_w)
+        doc_h = doc.size().height()
 
+        target_h = int(doc_h + 46)  # doc height + hint label + margins
+        target_h = min(self.MAX_HEIGHT, max(self.MIN_HEIGHT, target_h))
+
+        self.setFixedSize(target_w, target_h)
+
+        self._last_cursor_pos = QPoint(-1, -1)
         self._follow_cursor()
         self.fade_in()
         self._tracking_timer.start()
 
         # Force focus to capture shortcuts
-        self.content_edit.setFocus()
-        if IS_WINDOWS:
+        QTimer.singleShot(40, self._force_focus)
+        QTimer.singleShot(100, lambda: self.content_edit.setFocus())
+
+    def _on_tick(self):
+        """Timer callback: monitors global key states via GetAsyncKeyState and follows cursor."""
+        if not self.isVisible():
+            return
+
+        # 1. Asynchronous key detection (works 100% reliably even if focus is on another app)
+        if IS_WINDOWS and not self._copied_feedback:
             try:
-                ctypes.windll.user32.SetForegroundWindow(int(self.winId()))
+                user32 = ctypes.windll.user32
+                ctrl_down = bool(user32.GetAsyncKeyState(0x11) & 0x8000)
+                c_down = bool(user32.GetAsyncKeyState(0x43) & 0x8000)
+                x_down = bool(user32.GetAsyncKeyState(0x58) & 0x8000)
+                esc_down = bool(user32.GetAsyncKeyState(0x1B) & 0x8000)
+                enter_down = bool(user32.GetAsyncKeyState(0x0D) & 0x8000)
+
+                if (ctrl_down and c_down) or enter_down:
+                    self._copy_and_close()
+                    return
+                elif (ctrl_down and x_down) or esc_down:
+                    self.fade_out()
+                    return
             except Exception:
                 pass
+
+        # 2. Update position beside cursor
+        self._follow_cursor()
 
     def _follow_cursor(self):
         """Reposition the popup smoothly beside the cursor, bounded by screen geometry."""
         cursor_pos = QCursor.pos()
+        if cursor_pos == self._last_cursor_pos:
+            return
+        self._last_cursor_pos = cursor_pos
+
         w = self.width()
         h = self.height()
 
@@ -193,13 +295,32 @@ class TranslationPopup(QDialog):
             self.hint_lbl.setText("✓ Copied to clipboard!")
             self.hint_lbl.setStyleSheet("color: #30D158; font-weight: 600;")
             self.update()
-            # 300ms satisfying delay for the user to see the green glowing frame
-            QTimer.singleShot(300, self.fade_out)
+            # 250ms satisfying delay for the user to see the green glowing frame
+            QTimer.singleShot(250, self.fade_out)
         else:
             self.fade_out()
 
+    def mousePressEvent(self, event):
+        """Clicking on the card copies and closes."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._copy_and_close()
+            event.accept()
+        elif event.button() == Qt.MouseButton.RightButton:
+            self.fade_out()
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
     def eventFilter(self, obj, event):
-        """Intercept key events from child QTextEdit directly."""
+        """Intercept key and mouse events from child widgets directly."""
+        if event.type() == QEvent.Type.MouseButtonPress:
+            if event.button() == Qt.MouseButton.LeftButton:
+                self._copy_and_close()
+                return True
+            elif event.button() == Qt.MouseButton.RightButton:
+                self.fade_out()
+                return True
+
         if event.type() == QEvent.Type.KeyPress:
             # Ctrl + C -> Copy to clipboard & close
             if event.modifiers() & Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_C:
@@ -208,6 +329,10 @@ class TranslationPopup(QDialog):
             # Ctrl + X -> Close without copying
             if event.modifiers() & Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_X:
                 self.fade_out()
+                return True
+            # Enter / Return -> Copy to clipboard & close
+            if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                self._copy_and_close()
                 return True
             # Escape -> Close
             if event.key() == Qt.Key.Key_Escape:
@@ -226,6 +351,12 @@ class TranslationPopup(QDialog):
         # Ctrl + X -> Close without copying
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_X:
             self.fade_out()
+            event.accept()
+            return
+
+        # Enter / Return -> Copy & close
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self._copy_and_close()
             event.accept()
             return
 

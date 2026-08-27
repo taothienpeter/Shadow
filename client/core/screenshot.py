@@ -135,9 +135,39 @@ class ScreenshotCapture:
         Returns:
             JPEG image bytes
         """
-        # Engine 1: mss
+        # Engine 1: Qt Screen grab (100% DPI-aware and sub-pixel accurate)
+        try:
+            from PyQt6.QtGui import QGuiApplication
+            from PyQt6.QtCore import QPoint, QBuffer, QIODevice
+            screen = QGuiApplication.screenAt(QPoint(x, y)) or QGuiApplication.primaryScreen()
+            if screen:
+                geo = screen.geometry()
+                local_x = x - geo.x()
+                local_y = y - geo.y()
+                pixmap = screen.grabWindow(0, local_x, local_y, width, height)
+                if not pixmap.isNull():
+                    buffer = QBuffer()
+                    buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+                    pixmap.save(buffer, "JPEG", self.quality)
+                    raw_bytes = bytes(buffer.data())
+                    if len(raw_bytes) > 0:
+                        return raw_bytes
+        except Exception:
+            pass
+
+        # Engine 2: mss with physical pixel coordinate conversion
         if MSS_AVAILABLE and PIL_AVAILABLE:
             try:
+                from PyQt6.QtGui import QGuiApplication
+                from PyQt6.QtCore import QPoint
+                screen = QGuiApplication.screenAt(QPoint(x, y)) if 'QGuiApplication' in locals() else None
+                dpr = screen.devicePixelRatio() if screen else 1.0
+
+                phys_x = int(round(x * dpr))
+                phys_y = int(round(y * dpr))
+                phys_w = int(round(width * dpr))
+                phys_h = int(round(height * dpr))
+
                 with mss.mss() as sct:
                     virtual_mon = sct.monitors[0]
                     v_left = virtual_mon["left"]
@@ -145,10 +175,10 @@ class ScreenshotCapture:
                     v_right = v_left + virtual_mon["width"]
                     v_bottom = v_top + virtual_mon["height"]
 
-                    clamped_left = max(v_left, min(x, v_right - 1))
-                    clamped_top = max(v_top, min(y, v_bottom - 1))
-                    clamped_right = max(clamped_left + 1, min(x + width, v_right))
-                    clamped_bottom = max(clamped_top + 1, min(y + height, v_bottom))
+                    clamped_left = max(v_left, min(phys_x, v_right - 1))
+                    clamped_top = max(v_top, min(phys_y, v_bottom - 1))
+                    clamped_right = max(clamped_left + 1, min(phys_x + phys_w, v_right))
+                    clamped_bottom = max(clamped_top + 1, min(phys_y + phys_h, v_bottom))
 
                     monitor = {
                         "top": clamped_top,
@@ -163,10 +193,20 @@ class ScreenshotCapture:
             except Exception:
                 pass
 
-        # Engine 2: PIL ImageGrab
+        # Engine 3: PIL ImageGrab with DPR conversion
         if PIL_AVAILABLE:
             try:
-                bbox = (x, y, x + width, y + height)
+                from PyQt6.QtGui import QGuiApplication
+                from PyQt6.QtCore import QPoint
+                screen = QGuiApplication.screenAt(QPoint(x, y)) if 'QGuiApplication' in locals() else None
+                dpr = screen.devicePixelRatio() if screen else 1.0
+
+                phys_x = int(round(x * dpr))
+                phys_y = int(round(y * dpr))
+                phys_w = int(round(width * dpr))
+                phys_h = int(round(height * dpr))
+
+                bbox = (phys_x, phys_y, phys_x + phys_w, phys_y + phys_h)
                 img = ImageGrab.grab(bbox=bbox, all_screens=True)
                 return self._compress(img)
             except Exception:

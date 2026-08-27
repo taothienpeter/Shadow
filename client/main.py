@@ -185,7 +185,8 @@ def main():
         for idx, script in enumerate(current_scripts):
             hk = TrayApp.get_script_hotkey(script, idx)
             if hk and hk not in mapping:
-                mapping[hk] = (lambda i=idx: lambda: tray._run_script(i))(idx)
+                # Thread-safe cross-thread signal emit from Win32HotkeyThread to Qt GUI main thread
+                mapping[hk] = (lambda s=script: lambda: tray.trigger_script_by_data.emit(s))(script)
 
         return mapping
 

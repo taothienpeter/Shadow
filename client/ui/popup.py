@@ -283,12 +283,19 @@ class FloatingPopup(QDialog):
 
     def _apply_styles(self):
         """Load QSS from styles.qss."""
-        path = os.path.join(os.path.dirname(__file__), "styles.qss")
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                self.setStyleSheet(f.read())
-        except Exception as e:
-            print(f"Style load error: {e}")
+        candidates = [
+            os.path.join(os.path.dirname(__file__), "styles.qss"),
+            os.path.join(getattr(sys, "_MEIPASS", ""), "client", "ui", "styles.qss"),
+            os.path.join(getattr(sys, "_MEIPASS", ""), "_internal", "client", "ui", "styles.qss"),
+        ]
+        for path in candidates:
+            if path and os.path.exists(path):
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        self.setStyleSheet(f.read())
+                        return
+                except Exception as e:
+                    print(f"Style load error from {path}: {e}")
 
     # ── Positioning ─────────────────────────────────────────────
 
@@ -768,12 +775,7 @@ class FloatingPopup(QDialog):
 
     def eventFilter(self, obj, event):
         if obj == self.input_field and event.type() == QEvent.Type.KeyPress:
-            # Prevent Alt+Q from being typed into the input field
-            if event.modifiers() & Qt.KeyboardModifier.AltModifier:
-                if event.key() == Qt.Key.Key_Q:
-                    self.fade_out()
-                    return True
-            elif event.key() == Qt.Key.Key_Escape:
+            if event.key() == Qt.Key.Key_Escape:
                 self.fade_out()
                 return True
 
@@ -788,12 +790,10 @@ class FloatingPopup(QDialog):
             self.fade_out()
 
     def keyPressEvent(self, event):
-        if event.modifiers() & Qt.KeyboardModifier.AltModifier and event.key() == Qt.Key.Key_Q:
+        if event.key() == Qt.Key.Key_Escape:
             self.fade_out()
             event.accept()
             return
-        if event.key() == Qt.Key.Key_Escape:
-            self.fade_out()
         elif event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             if self.input_field.hasFocus():
                 self._on_send()

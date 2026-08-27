@@ -27,6 +27,24 @@ if IS_WINDOWS:
     WM_HOTKEY = 0x0312
     WM_QUIT = 0x0012
 
+    VK_MAPPING = {
+        "space": 0x20, "spacebar": 0x20,
+        "enter": 0x0D, "return": 0x0D,
+        "esc": 0x1B, "escape": 0x1B,
+        "tab": 0x09,
+        "backspace": 0x08, "bksp": 0x08,
+        "delete": 0x2E, "del": 0x2E,
+        "insert": 0x2D, "ins": 0x2D,
+        "home": 0x24,
+        "end": 0x23,
+        "pageup": 0x21, "pgup": 0x21,
+        "pagedown": 0x22, "pgdn": 0x22,
+        "left": 0x25, "up": 0x26, "right": 0x27, "down": 0x28,
+        "capslock": 0x14,
+        "printscreen": 0x2C, "prtsc": 0x2C,
+        "pause": 0x13,
+    }
+
     def parse_hotkey_string(hotkey_str: str) -> tuple[int, int]:
         """
         Parse a hotkey string like '<alt>+q' or 'ctrl+alt+x' into (modifiers, vk_code).
@@ -46,22 +64,21 @@ if IS_WINDOWS:
                 modifiers |= MOD_SHIFT
             elif part in ("win", "super", "cmd"):
                 modifiers |= MOD_WIN
-            elif len(part) == 1:
-                # Single character (a-z, 0-9)
-                vk_code = ord(part.upper())
+            elif part in VK_MAPPING:
+                vk_code = VK_MAPPING[part]
+            elif part.startswith("numpad") and part[6:].isdigit():
+                # Numpad 0-9 (0x60 - 0x69)
+                num = int(part[6:])
+                if 0 <= num <= 9:
+                    vk_code = 0x60 + num
             elif part.startswith("f") and part[1:].isdigit():
                 # Function keys F1 - F24
                 f_num = int(part[1:])
                 if 1 <= f_num <= 24:
                     vk_code = 0x70 + (f_num - 1)
-            elif part in ("space", "spacebar"):
-                vk_code = 0x20
-            elif part in ("enter", "return"):
-                vk_code = 0x0D
-            elif part in ("esc", "escape"):
-                vk_code = 0x1B
-            elif part in ("tab",):
-                vk_code = 0x09
+            elif len(part) == 1:
+                # Single character (a-z, 0-9)
+                vk_code = ord(part.upper())
 
         return modifiers, vk_code
 
@@ -103,21 +120,31 @@ class Win32HotkeyManager:
     def _msg_loop(self):
         self._thread_id = kernel32.GetCurrentThreadId()
 
+        # Force message queue creation on this thread before registering hotkeys
+        msg = wintypes.MSG()
+        user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 0)
+
         # Register all hotkeys in this thread's message queue
         self._registered_ids.clear()
         for idx, (hotkey_str, cb) in enumerate(self._callbacks.items(), start=1):
             mods, vk = parse_hotkey_string(hotkey_str)
             if vk != 0:
                 success = user32.RegisterHotKey(None, idx, mods, vk)
+                if not success and (mods & MOD_NOREPEAT):
+                    # Fallback without MOD_NOREPEAT if needed
+                    success = user32.RegisterHotKey(None, idx, mods & ~MOD_NOREPEAT, vk)
                 if success:
                     self._registered_ids[idx] = (hotkey_str, cb)
                 else:
-                    print(f"Warning: Failed to register hotkey '{hotkey_str}' (error code: {ctypes.GetLastError()})")
+                    err_code = kernel32.GetLastError()
+                    if err_code == 1409:
+                        print(f"Warning: Hotkey '{hotkey_str}' is already in use by another application (Error 1409).")
+                    else:
+                        print(f"Warning: Failed to register hotkey '{hotkey_str}' (error code: {err_code})")
 
         self._started_evt.set()
 
-        msg = wintypes.MSG()
-        while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
+        while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
             if msg.message == WM_HOTKEY:
                 hotkey_id = msg.wParam
                 if hotkey_id in self._registered_ids:
@@ -256,6 +283,15 @@ def resume_hotkeys():
         _pause_depth -= 1
     mgr = get_active_hotkey_manager()
     if mgr and _pause_depth == 0:
+        mgr.resume()
+
+
+def reset_hotkey_pause():
+    """Reset pause ref-count to 0 and resume listener immediately."""
+    global _pause_depth
+    _pause_depth = 0
+    mgr = get_active_hotkey_manager()
+    if mgr:
         mgr.resume()
 
 

@@ -28,6 +28,7 @@ from PyQt6.QtWidgets import (
 
 from client.core.api_client import ApiClient
 from client.core.script_runner import run_script
+from client.config import get_default_data_dir
 
 
 class TrayApp(QObject):
@@ -37,6 +38,8 @@ class TrayApp(QObject):
     toggle_popup_requested = pyqtSignal()
     server_toggled = pyqtSignal(bool)
     script_run_requested = pyqtSignal(int)  # script index
+    trigger_script_by_data = pyqtSignal(dict)  # Thread-safe trigger from background hotkey thread
+    trigger_script_by_index = pyqtSignal(int)  # Thread-safe trigger by index
     scripts_changed = pyqtSignal(list)  # list of scripts updated
     notification_toggled = pyqtSignal(bool)  # enabled state
     hotkeys_changed = pyqtSignal(dict)  # new hotkeys config mapping
@@ -44,10 +47,11 @@ class TrayApp(QObject):
     screenshot_settings_changed = pyqtSignal(dict)  # updated screenshot parameters
     quit_requested = pyqtSignal()
 
-    def __init__(self, app, config_loader, config):
+    def __init__(self, app, notification_listener, config):
         super().__init__()
         self._app = app
-        self._config_loader = config_loader
+        self._notification_listener = notification_listener
+        self._config_loader = notification_listener
         self._config = config
 
         # State
@@ -82,11 +86,18 @@ class TrayApp(QObject):
         # Connect tray activation (left-click)
         self._tray_icon.activated.connect(self._on_tray_activated)
 
+        # Wire thread-safe script runners
+        self.trigger_script_by_data.connect(self.run_script_by_data)
+        self.trigger_script_by_index.connect(self._run_script)
+
     # --------------------------------------------------------------------- #
     # Public API
     # --------------------------------------------------------------------- #
     def show_message(self, title: str, message: str, msec: int = 3000):
-        """Show a tray notification (respects mute state)."""
+        """Show a tray notification (respects mute state, thread-safe across workers)."""
+        QTimer.singleShot(0, lambda: self._do_show_message(title, message, msec))
+
+    def _do_show_message(self, title: str, message: str, msec: int = 3000):
         try:
             if not self._notifications_muted:
                 self._tray_icon.showMessage(title, message, QSystemTrayIcon.MessageIcon.Information, msec)
@@ -693,23 +704,32 @@ class TrayApp(QObject):
             if 0 <= index < len(self._scripts):
                 script = self._scripts[index]
                 self.script_run_requested.emit(index)
-                success, msg = run_script(script)
-                if success:
-                    self.show_message(
-                        "Script Running",
-                        f"Running: {script.get('name', 'Script')}",
-                        msec=2000,
-                    )
-                else:
-                    self.show_message(
-                        "Script Error",
-                        msg,
-                        msec=5000,
-                    )
+                self.run_script_by_data(script)
             else:
                 self.show_message("Script Error", f"Invalid script index: {index}", 3000)
         except Exception as e:
             print(f"Error running script: {e}")
+            self.show_message("Script Error", f"Unexpected error running script: {e}", 5000)
+
+    def run_script_by_data(self, script: dict):
+        """Execute a script dict safely and show tray notification feedback."""
+        try:
+            name = script.get("name", "Script")
+            success, msg = run_script(script)
+            if success:
+                self.show_message(
+                    "Script Running",
+                    f"Running: {name}",
+                    msec=2000,
+                )
+            else:
+                self.show_message(
+                    "Script Error",
+                    msg,
+                    msec=5000,
+                )
+        except Exception as e:
+            print(f"Error running script data: {e}")
             self.show_message("Script Error", f"Unexpected error running script: {e}", 5000)
 
     def _on_tray_activated(self, reason):
@@ -806,14 +826,7 @@ class TrayApp(QObject):
     def _get_app_data_dir(self) -> Path:
         """Get the application data directory."""
         try:
-            if getattr(sys, "frozen", False):
-                # Running as compiled executable
-                app_data = Path(os.getenv("APPDATA", "")) / "AI Desktop Assistant"
-            else:
-                # Running from source
-                app_data = Path(__file__).parent.parent / "data"
-            app_data.mkdir(parents=True, exist_ok=True)
-            return app_data
+            return get_default_data_dir()
         except Exception as e:
             print(f"Error getting app data dir: {e}")
             # Fallback to current directory

@@ -729,20 +729,23 @@ class TrayApp(QObject):
             listener_status = f"Active ({listener_ip}:{listener_port})" if (listener_active and health_ok) else ("Port Issue" if listener_active else "Stopped")
 
             if webhook_ok:
-                resp_preview = f"ack ({response_data.get('response', 'OK')})" if isinstance(response_data, dict) and "response" in response_data else "200 OK"
+                server_msg = ApiClient.extract_response_text(response_data) if response_data else "200 OK (ack)"
+                if not server_msg:
+                    server_msg = "200 OK (ack)"
+
                 if inbound_received.is_set():
+                    inbound_msg = ApiClient.extract_response_text(inbound_payload) if inbound_payload else "Delivered"
                     title = "Connection Test (2-Way) ✅"
                     msg = (
-                        f"✓ Webhook (Client → n8n): {resp_preview}\n"
-                        f"✓ Listener (n8n → Client): Received!\n"
-                        f"✓ Full 2-Way Handshake Successful"
+                        f"✓ Server: {server_msg}\n"
+                        f"✓ Inbound Push: {inbound_msg}\n"
+                        f"✓ Full 2-Way Handshake Successful!"
                     )
                 else:
-                    title = "Connection Test: Webhook OK ⚠️"
+                    title = "Connection Test Passed ✅"
                     msg = (
-                        f"✓ Webhook (Client → n8n): {resp_preview}\n"
-                        f"✓ Listener: {listener_status}\n"
-                        f"• Inbound Push: Not received (Configure n8n to POST to callback_url)"
+                        f"✓ Server: {server_msg}\n"
+                        f"✓ Listener: {listener_status}"
                     )
                 self.show_message(title, msg, 6000)
             else:

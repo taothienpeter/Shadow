@@ -128,26 +128,40 @@ Tất cả các request từ Shadow Client đều được gửi bằng phương
 
 ---
 
-### 2.4. Request 4: Kiểm tra Kết nối Webhook (`action: "test"`)
+### 2.4. Request 4: Kiểm tra Kết nối 2 Chiều Webhook & Notification (`action: "test"`)
 
-* **Nguồn gốc:** Khi chạy script kiểm tra kết nối `test_connection.py` hoặc bấm Test Connection trên Menu Tray.
-* **Hàm thực thi:** `test_connection.py -> test_webhook_api()`
+* **Nguồn gốc:** Khi chạy script kiểm tra kết nối `test_connection.py` hoặc bấm **Test Connection** trên Menu System Tray.
+* **Hàm thực thi:** `tray_app.py -> _on_test_connection()` hoặc `test_connection.py -> test_webhook_api()`
 
-#### Request Body (JSON):
+#### Request Body từ Client (JSON):
 ```json
 {
   "action": "test",
-  "timestamp": "2026-08-23T20:40:00.000000+00:00"
+  "test_id": "a1b2c3d4",
+  "timestamp": "2026-08-28T15:10:00.000000+00:00",
+  "callback_url": "http://100.x.y.z:8080/notification",
+  "tailscale_ip": "100.x.y.z",
+  "notification_port": 8080
 }
 ```
 
-#### Phản hồi Mong đợi từ Server (JSON):
-Server n8n nhận `action: "test"` và chỉ cần trả về JSON xác nhận:
+#### Xử lý trên Server n8n:
+1. **Phản hồi đồng bộ (Chiều 1 - Outbound Webhook):** Trả về HTTP 200 JSON:
 ```json
 {
   "response": "ack"
 }
 ```
+2. **Kích hoạt Push Test (Chiều 2 - Inbound Notification - Khuyên dùng):**
+   * Trong workflow n8n nhánh `action == "test"`, thêm 1 node **HTTP Request** gửi POST tới `$json.body.callback_url` với body:
+   ```json
+   {
+     "title": "2-Way Test Connection",
+     "message": "Kết nối 2 chiều giữa n8n và Shadow Client hoàn tất thành công!",
+     "test_id": "{{ $json.body.test_id }}"
+   }
+   ```
+   * Khi đó Shadow Client sẽ nhận được và xác nhận: **`Connection Test (2-Way) ✅`**.
 
 ---
 

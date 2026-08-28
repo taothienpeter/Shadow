@@ -103,7 +103,7 @@ def test_port_availability(host, port):
         return True
 
 
-async def test_webhook_api():
+async def test_webhook_api(test_id: str = "test-cli"):
     """Test connection to the webhook API (Client -> n8n)."""
     print("- Testing Webhook API (Client -> n8n)")
 
@@ -116,9 +116,15 @@ async def test_webhook_api():
     )
 
     try:
+        listener_ip = config.tailscale_ip
+        listener_port = config.notification_port
         test_data = {
             "action": "test",
+            "test_id": test_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            "callback_url": f"http://{listener_ip}:{listener_port}/notification",
+            "tailscale_ip": listener_ip,
+            "notification_port": listener_port,
         }
 
         response = await api_client.ask_respond(test_data)
@@ -255,25 +261,48 @@ async def main():
     print("\n📋 Running Connectivity Tests:")
     print("-" * 40)
 
-    webhook_ok = await test_webhook_api()
+    import uuid
+    test_id = f"cli-{str(uuid.uuid4())[:8]}"
 
     host_for_health = config.tailscale_ip if config.tailscale_ip != "0.0.0.0" else "127.0.0.1"
     health_ok = test_notification_health(host_for_health, config.notification_port)
 
-    notification_ok = False
-    notification_payload = None
-    if health_ok:
-        auth_token = config.n8n_auth_token if config.n8n_auth_token and config.n8n_auth_token != "" else None
-        success, payload = test_notification_listener(
-            listen_host=listen_host,
+    # Start listener first if health passed or port is available
+    listener = None
+    tester = NotificationTester()
+    auth_token = config.n8n_auth_token if config.n8n_auth_token and config.n8n_auth_token != "" else None
+    
+    app = QApplication.instance() or QApplication([])
+
+    try:
+        listener = NotificationListener(
+            host=listen_host,
             port=config.notification_port,
-            auth_token=auth_token,
-            timeout_seconds=30
+            auth_token=auth_token
         )
-        notification_ok = success
-        notification_payload = payload
-    else:
-        print("\n- Skipping Notification Listener Test (health check failed)")
+        listener.notification_received.connect(tester._on_notification)
+        listener.start()
+        print(f"  🚀 Inbound Listener active on {listen_host}:{config.notification_port}")
+    except Exception as e:
+        print(f"  ⚠️  Could not start standalone listener (may already be running in Shadow.exe): {e}")
+
+    # Now send webhook with callback_url and test_id
+    webhook_ok = await test_webhook_api(test_id=test_id)
+
+    # Wait up to 5 seconds to check if n8n triggered callback
+    print("  ⏳ Waiting up to 5s for n8n callback...")
+    start_t = time.time()
+    while not tester.received and (time.time() - start_t) < 5.0:
+        await asyncio.sleep(0.5)
+
+    if listener:
+        try:
+            listener.stop()
+        except Exception:
+            pass
+
+    notification_ok = tester.received
+    notification_payload = tester.payload
 
     print("\n" + "=" * 60)
     print("📊 Test Results:")
